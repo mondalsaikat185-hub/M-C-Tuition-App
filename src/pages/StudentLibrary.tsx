@@ -116,7 +116,7 @@ export function StudentLibrary() {
         try {
            const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
            const phonePassword = user?.phone || 'student-password';
-           byteArray = await encryptPDF(byteArray, phonePassword.trim());
+           byteArray = (await encryptPDF(byteArray, phonePassword.trim())) as any;
         } catch (pdfErr) {
            console.warn("Could not encrypt PDF with phone number:", pdfErr);
         }

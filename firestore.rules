@@ -36,6 +36,7 @@ service cloud.firestore {
              (!('exemptReason' in data) || data.exemptReason == null || data.exemptReason is string) &&
              (!('pendingMonths' in data) || data.pendingMonths == null || data.pendingMonths is number) &&
              (!('showPaymentNudge' in data) || data.showPaymentNudge == null || data.showPaymentNudge is bool) &&
+             (!('activeDevices' in data) || data.activeDevices == null || data.activeDevices is list) &&
              data.createdAt is timestamp &&
              data.updatedAt is timestamp;
     }
@@ -48,7 +49,7 @@ service cloud.firestore {
       allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming()) &&
                     (isAdmin() || (userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(
                       ['updatedAt', 'fullName', 'address', 'dob', 'joinDate', 'phone',
-                       'photoURL', 'profilePhotoUrl', 'isProfileComplete', 'batchId']
+                       'photoURL', 'profilePhotoUrl', 'isProfileComplete', 'batchId', 'activeDevices']
                     )));
       allow delete: if isAdmin();
     }

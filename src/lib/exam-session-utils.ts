@@ -107,8 +107,8 @@ export async function recordAttendance(
   }
 }
 
-// ─── Get last 3 attendance days for a batch ──────────────────────────────────
-export async function getRecentAttendanceWithCleanup(batchId: string, isAdmin: boolean) {
+// ─── Get all attendance days for a batch ──────────────────────────────────
+export async function getAllAttendanceForBatch(batchId: string) {
   const q = query(
     collection(db, 'attendance'),
     where('batchId', '==', batchId),
@@ -117,16 +117,7 @@ export async function getRecentAttendanceWithCleanup(batchId: string, isAdmin: b
   const snap = await getDocs(q);
   const docs = snap.docs;
   
-  // If admin, clean up old records
-  if (isAdmin && docs.length > 3) {
-    const toDelete = docs.slice(3);
-    const batch = writeBatch(db);
-    toDelete.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
-  
-  // Return only the 3 most recent regardless
-  return docs.slice(0, 3).map((d) => ({
+  return docs.map((d) => ({
     date: d.data().date as string,
     presentStudentIds: d.data().presentStudentIds as string[],
   }));

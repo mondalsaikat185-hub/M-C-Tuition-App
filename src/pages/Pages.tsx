@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Check, X, Loader2, Trash2, Plus } from 'lucide-react';
+import { ArrowLeft, Check, X, Loader2, Trash2, Plus, Search } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { collection, getDocs, getDoc, doc, updateDoc, setDoc, query, where, addDoc, deleteDoc, serverTimestamp, writeBatch, Timestamp, onSnapshot } from 'firebase/firestore';
@@ -7,7 +7,7 @@ import { db } from '../lib/firebase';
 import { AppUser, useAuth } from '../components/AuthProvider';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
-import { getRecentAttendanceWithCleanup } from '../lib/exam-session-utils';
+import { getAllAttendanceForBatch } from '../lib/exam-session-utils';
 
 export function PageHeader({ title, backTo, description }: { title: string, backTo: string, description?: string }) {
   const navigate = useNavigate();
@@ -73,18 +73,23 @@ export function AdminStudents() {
   const [attendanceData, setAttendanceData] = useState<
     Record<string, Array<{ date: string; presentStudentIds: string[] }>>
   >({});
+  
+  const [activeBatchTab, setActiveBatchTab] = useState<string>('');
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
+  const [attendanceDateFilter, setAttendanceDateFilter] = useState('');
 
   useEffect(() => {
     if (!batches.length) return;
+    if (!activeBatchTab) setActiveBatchTab(batches[0].id);
     const fetchAll = async () => {
       const result: Record<string, Array<{ date: string; presentStudentIds: string[] }>> = {};
       for (const batch of batches) {
-        result[batch.id] = await getRecentAttendanceWithCleanup(batch.id, true);
+        result[batch.id] = await getAllAttendanceForBatch(batch.id);
       }
       setAttendanceData(result);
     };
     fetchAll();
-  }, [batches]);
+  }, [batches, activeBatchTab]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -225,70 +230,121 @@ export function AdminStudents() {
         <p className="text-xs text-zinc-500 font-bold mt-4">Note: Use this to safely generate random student profiles for testing features (Payments, Results, Library) securely. No google sign-in needed.</p>
       </div>
 
-      {batches.map((batch) => {
-        const records = attendanceData[batch.id] || [];
-        const batchStudents = students.filter((s) => s.batchId === batch.id);
+      {batches.length > 0 && (
+        <div className="mb-8 border-4 border-black bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] flex flex-col">
+          <div className="flex overflow-x-auto border-b-4 border-black scrollbar-hide">
+            {batches.map(batch => (
+              <button
+                key={batch.id}
+                onClick={() => {
+                   setActiveBatchTab(batch.id);
+                   setAttendanceSearchQuery('');
+                   setAttendanceDateFilter('');
+                }}
+                className={`px-4 py-3 font-bold text-sm uppercase whitespace-nowrap border-r-4 border-black transition-colors ${
+                  activeBatchTab === batch.id 
+                    ? 'bg-yellow-300 text-black' 
+                    : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                }`}
+              >
+                {batch.name}
+              </button>
+            ))}
+          </div>
 
-        return (
-          <div key={batch.id} className="mb-8 border-4 border-black p-4 bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)]">
-            <div className="flex justify-between items-center mb-4">
-               <h3 className="font-black text-lg">{batch.name} — শেষ ৩ দিনের উপস্থিতি</h3>
-            </div>
-
-            {batchStudents.length === 0 ? (
-              <p className="text-sm p-4 text-center font-bold text-zinc-500">There are no students in this batch yet.</p>
-            ) : records.length === 0 ? (
-              <p className="text-sm border-2 border-dashed border-gray-300 p-4 text-center">কোনো উপস্থিতির তথ্য নেই</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr>
-                      <th className="border-2 border-black px-3 py-2 text-left bg-black text-white">ছাত্র</th>
-                      {records.map((r) => (
-                        <th key={r.date} className="border-2 border-black px-3 py-2 bg-yellow-200 text-black text-center whitespace-nowrap">
-                          {r.date}
-                        </th>
-                      ))}
-                      <th className="border-2 border-black px-3 py-2 bg-red-100 text-black text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {batchStudents.map((student) => {
-                      const absenceCount = records.filter(
-                        (r) => !r.presentStudentIds.includes(student.uid)
-                      ).length;
-                      const allAbsent = absenceCount === records.length && records.length >= 3;
-
-                      return (
-                        <tr key={student.uid} className={allAbsent ? 'bg-red-50 text-black' : ''}>
-                          <td className="border-2 border-black px-3 py-2 font-bold">
-                            {student.fullName || student.email}
-                          </td>
-                          {records.map((r) => (
-                            <td key={r.date} className="border-2 border-black px-3 py-2 text-center text-xl">
-                              {r.presentStudentIds.includes(student.uid) ? '✅' : '❌'}
-                            </td>
-                          ))}
-                          <td className="border-2 border-black px-3 py-2 text-center">
-                            {allAbsent ? (
-                              <span className="bg-red-500 text-white px-2 py-1 text-xs font-black">
-                                ৩ দিন ABSENT
-                              </span>
-                            ) : (
-                              <span className="text-green-600 font-bold text-xs">OK</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+          <div className="p-4 flex-1">
+            {activeBatchTab && (
+              <div className="mb-4 flex flex-col sm:flex-row gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-bold uppercase mb-1">Search Student</label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by name..."
+                      value={attendanceSearchQuery}
+                      onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                      className="w-full border-2 border-zinc-900 dark:border-zinc-100 pl-10 p-2 bg-white dark:bg-zinc-900 text-sm focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-bold uppercase mb-1">Filter by Date</label>
+                  <select
+                    value={attendanceDateFilter}
+                    onChange={(e) => setAttendanceDateFilter(e.target.value)}
+                    className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-white dark:bg-zinc-900 text-sm focus:outline-none"
+                  >
+                    <option value="">All Days</option>
+                    {(attendanceData[activeBatchTab] || []).map(r => (
+                      <option key={r.date} value={r.date}>{r.date}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             )}
+
+            {activeBatchTab && (() => {
+              const records = attendanceData[activeBatchTab] || [];
+              const rawBatchStudents = students.filter((s) => s.batchId === activeBatchTab);
+              
+              const filteredStudents = rawBatchStudents.filter(s => {
+                if (!attendanceSearchQuery) return true;
+                const search = attendanceSearchQuery.toLowerCase();
+                return s.fullName?.toLowerCase().includes(search) || s.email.toLowerCase().includes(search);
+              });
+              
+              const filteredRecords = records.filter(r => {
+                if (!attendanceDateFilter) return true;
+                return r.date === attendanceDateFilter;
+              });
+
+              if (rawBatchStudents.length === 0) {
+                return <p className="text-sm p-4 text-center font-bold text-zinc-500">There are no students in this batch yet.</p>;
+              }
+              if (records.length === 0) {
+                return <p className="text-sm border-2 border-dashed border-gray-300 dark:border-zinc-700 p-4 text-center">কোনো উপস্থিতির তথ্য নেই</p>;
+              }
+              if (filteredStudents.length === 0) {
+                return <p className="text-sm border-2 border-dashed border-gray-300 dark:border-zinc-700 p-4 text-center">No students match your search.</p>;
+              }
+
+              return (
+                <div className="overflow-x-auto max-h-[500px] border-2 border-black">
+                  <table className="w-full border-collapse text-sm">
+                    <thead className="sticky top-0 z-10">
+                      <tr>
+                        <th className="border-b-2 border-r-2 border-black px-3 py-2 text-left bg-black text-white w-48 min-w-[192px]">ছাত্র</th>
+                        {filteredRecords.map((r) => (
+                          <th key={r.date} className="border-b-2 border-r-2 border-black px-3 py-2 bg-yellow-200 text-black text-center whitespace-nowrap min-w-[100px]">
+                            {r.date}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredStudents.map((student, i) => {
+                        return (
+                          <tr key={student.uid} className={i % 2 === 0 ? "bg-white dark:bg-zinc-900" : "bg-zinc-50 dark:bg-zinc-800"}>
+                            <td className="border-r-2 border-b border-zinc-200 dark:border-zinc-700 border-l border-zinc-200 px-3 py-2 font-bold whitespace-nowrap overflow-hidden text-ellipsis w-48 max-w-[192px]">
+                              {student.fullName || student.email}
+                            </td>
+                            {filteredRecords.map((r) => (
+                              <td key={r.date} className="border-r border-b border-zinc-200 dark:border-zinc-700 px-3 py-2 text-center text-xl">
+                                {r.presentStudentIds.includes(student.uid) ? '✅' : '❌'}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
-        );
-      })}
+        </div>
+      )}
 
       <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] overflow-x-auto w-full">
         {loading ? (

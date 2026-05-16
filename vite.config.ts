@@ -16,10 +16,24 @@ export default defineConfig(({mode}) => {
           name: 'Mondal Coaching',
           short_name: 'MC Exams',
           description: 'Mondal Coaching Live Exam Portal',
-          theme_color: '#EAB308', // yellow-500
+          theme_color: '#000000', // deep royal blue or black
           background_color: '#000000',
           display: 'standalone',
+          start_url: '/',
           icons: [
+            {
+              src: 'pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any maskable'
+            },
+            {
+              src: 'pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any maskable'
+            },
+            // Fallbacks if they still use SVGs
             {
               src: 'pwa-192x192.svg',
               sizes: '192x192',

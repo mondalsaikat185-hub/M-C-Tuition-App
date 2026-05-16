@@ -4,9 +4,10 @@ import {
   User as FirebaseUser,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
   signOut as firebaseSignOut
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 
@@ -22,6 +23,7 @@ export interface AppUser {
   status: UserStatus;
   createdAt: any;
   updatedAt: any;
+  activeDevices?: string[];
   // Additional fields for student
   fullName?: string;
   address?: string;
@@ -59,6 +61,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let docUnsubscribe: (() => void) | null = null;
 
+    // Persist a unique device ID in localStorage to track this browser instance
+    const currentDeviceId = localStorage.getItem('mc_local_device_id') || Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+    localStorage.setItem('mc_local_device_id', currentDeviceId);
+
     const unsubscribeFb = onAuthStateChanged(auth, async (firebaseUser) => {
       setFbUser(firebaseUser);
       
@@ -87,6 +93,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           // Initialize if it doesn't exist
           const docSnap = await getDoc(userRef);
+          
+          let activeDevices = docSnap.exists() ? (docSnap.data().activeDevices || []) : [];
+          let needsDeviceUpdate = false;
+          
+          if (!activeDevices.includes(currentDeviceId)) {
+             activeDevices.push(currentDeviceId);
+             if (activeDevices.length > 2) {
+                 activeDevices = activeDevices.slice(activeDevices.length - 2); // Keep only the last 2 devices
+             }
+             needsDeviceUpdate = true;
+          }
+
           if (!docSnap.exists()) {
             const newUser = {
               uid: firebaseUser.uid,
@@ -95,20 +113,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               photoURL: firebaseUser.photoURL || null,
               role: isAdmin ? 'admin' : 'student',
               status: isAdmin ? 'active' : 'pending',
+              activeDevices,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             };
             await setDoc(userRef, newUser);
           } else {
-            // Already exists, but we should make sure admin has admin role
+            // Already exists, but we should make sure admin has admin role & update devices
             const data = docSnap.data();
+            const updates: any = {};
             if (isAdmin && (data.role !== 'admin' || data.status !== 'active')) {
-              await setDoc(userRef, {
-                ...data,
-                role: 'admin',
-                status: 'active',
-                updatedAt: serverTimestamp()
-              }, { merge: true });
+              updates.role = 'admin';
+              updates.status = 'active';
+            }
+            if (needsDeviceUpdate) {
+              updates.activeDevices = activeDevices;
+            }
+            if (Object.keys(updates).length > 0) {
+              updates.updatedAt = serverTimestamp();
+              await updateDoc(userRef, updates);
             }
           }
         } catch (error) {
@@ -118,7 +141,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Listen for real-time updates
         docUnsubscribe = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
-            setUser(docSnap.data() as AppUser);
+            const data = docSnap.data() as AppUser;
+            
+            // Check max device limit (Auto-logout if bumped)
+            const allowedDevices = data.activeDevices || [];
+            if (allowedDevices.length > 0 && !allowedDevices.includes(currentDeviceId)) {
+               firebaseSignOut(auth).then(() => {
+                  alert("You have been logged out because this account signed in from 2 other devices.");
+               });
+               return;
+            }
+
+            setUser(data);
           }
           setLoading(false);
         }, (error) => {
@@ -146,10 +180,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       console.error("Sign in failed", error);
-      if (error.code === 'auth/popup-blocked') {
-        alert("Popup was blocked by your browser. Please allow popups or open this app in a new tab (click the ↗ icon in the top right).");
-      } else if (error.code === 'auth/network-request-failed') {
-        alert("Sign in failed: Network error. Since this app passes through an iframe, your browser might be blocking the login (especially in Safari, Brave, or Incognito). Please open the app in a NEW TAB (click the top-right ↗ icon) and try again.");
+      if (error.code === 'auth/popup-blocked' || error.code === 'auth/network-request-failed') {
+        try {
+           await signInWithRedirect(auth, provider);
+        } catch (redirectError) {
+           alert("Unable to sign in due to browser restrictions. Please open the app in a new tab by clicking ↗ or 'Share' in the top right.");
+        }
       } else if (error.code === 'auth/cancelled-popup-request') {
         // Safe to ignore, user just closed it
       } else {
