@@ -1803,9 +1803,21 @@ export function StudentPayments() {
                          )}
                          
                          <div className="mt-4 border-t-2 border-zinc-200 dark:border-zinc-800 pt-4 w-full">
-                            <p className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300">Having trouble with UPI apps?</p>
-                            <p className="text-[10px] mt-1 text-zinc-500">You can also pay directly to this number via any UPI app:</p>
-                            <div className="text-xl font-black text-zinc-900 dark:text-white mt-1 mb-2">9432490498</div>
+                            <p className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300">UPI links not working or failing?</p>
+                            <p className="text-[10px] mt-1 text-zinc-500">You can copy the UPI ID below and paste it directly into your UPI app (like GPay, PhonePe, or Paytm):</p>
+                            <div className="flex items-center justify-center gap-2 mt-2">
+                               <div className="text-sm font-black text-zinc-900 dark:text-white p-2 border-2 border-zinc-300 select-all">{upiId}</div>
+                               <button 
+                                 onClick={(e) => {
+                                    e.preventDefault();
+                                    navigator.clipboard.writeText(upiId);
+                                    alert('UPI ID copied to clipboard!');
+                                 }}
+                                 className="p-2 bg-blue-100 text-blue-700 hover:bg-blue-200 font-bold text-xs uppercase"
+                               >
+                                 Copy ID
+                               </button>
+                            </div>
                          </div>
                       </>
                    );

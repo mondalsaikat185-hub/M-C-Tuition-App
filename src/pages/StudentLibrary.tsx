@@ -260,6 +260,12 @@ export function StudentLibrary() {
        const activeSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === true);
        const endedSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === false);
 
+       if (batchSessionDocs.length === 0) {
+          // No sessions at all -> just a mock test or open assignment
+          setPreviewItem(item);
+          return;
+       }
+
        if (activeSessionDocs.length === 0) {
           if (endedSessionDocs.length > 0) {
              // Session ended -> direct access without code

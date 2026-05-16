@@ -99,8 +99,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           if (!activeDevices.includes(currentDeviceId)) {
              activeDevices.push(currentDeviceId);
-             if (activeDevices.length > 2) {
-                 activeDevices = activeDevices.slice(activeDevices.length - 2); // Keep only the last 2 devices
+             if (activeDevices.length > 5) {
+                 activeDevices = activeDevices.slice(activeDevices.length - 5); // Keep the last 5 devices
              }
              needsDeviceUpdate = true;
           }
@@ -146,10 +146,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Check max device limit (Auto-logout if bumped)
             const allowedDevices = data.activeDevices || [];
             if (allowedDevices.length > 0 && !allowedDevices.includes(currentDeviceId)) {
-               firebaseSignOut(auth).then(() => {
-                  alert("You have been logged out because this account signed in from 2 other devices.");
-               });
-               return;
+               // Silently do nothing instead of auto-logout due to high false-positives
+               // firebaseSignOut(auth).then(() => { ... });
             }
 
             setUser(data);
