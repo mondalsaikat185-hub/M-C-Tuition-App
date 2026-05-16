@@ -93,6 +93,61 @@ export function StudentLibrary() {
     fetchData();
   }, [user]);
 
+  const handleDownloadUrl = async (item: LibraryItem) => {
+     if (!item.contentUrl || !item.id) return;
+     try {
+        setDownloadingId(item.id);
+        const res = await fetch(item.contentUrl);
+        if (!res.ok) throw new Error("Fetch failed");
+        const arrayBuffer = await res.arrayBuffer();
+        
+        let byteArray = new Uint8Array(arrayBuffer);
+        try {
+           const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
+           const pdfDoc = await PDFDocument.load(byteArray);
+           const pages = pdfDoc.getPages();
+           const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+           const watermarkText = `Downloaded by: ${user?.fullName || user?.displayName || user?.email || 'Student'} | ${new Date().toLocaleString('en-IN')}`;
+           
+           for (const page of pages) {
+             const { width, height } = page.getSize();
+             const textSize = 9;
+             const textWidth = font.widthOfTextAtSize(watermarkText, textSize);
+             page.drawText(watermarkText, {
+               x: width - textWidth - 15,
+               y: height - 20,
+               size: textSize,
+               font: font,
+               color: rgb(0.5, 0.5, 0.5),
+               opacity: 0.4,
+             });
+           }
+           byteArray = await pdfDoc.save();
+        } catch (watermarkErr) {
+           console.warn("Could not add watermark to URL item:", watermarkErr);
+        }
+
+        try {
+           const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
+           const phonePassword = user?.phone || 'student-password';
+           byteArray = (await encryptPDF(byteArray, phonePassword.trim())) as any;
+        } catch (pdfErr) {
+           console.warn("Could not encrypt PDF with phone number:", pdfErr);
+        }
+
+        const blob = new Blob([byteArray], { type: 'application/pdf' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = item.fileName || 'note.pdf';
+        link.click();
+     } catch (e) {
+        console.error("Direct download with watermark failed. Opening directly.", e);
+        window.open(item.contentUrl, '_blank');
+     } finally {
+        setDownloadingId(null);
+     }
+  };
+
   const handleDownloadChunked = async (item: LibraryItem) => {
      if (!item.isChunked || !item.chunkCount || !item.id) return;
      try {
@@ -112,6 +167,31 @@ export function StudentLibrary() {
             byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
         let byteArray = new Uint8Array(byteNumbers);
+
+        try {
+           const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
+           const pdfDoc = await PDFDocument.load(byteArray);
+           const pages = pdfDoc.getPages();
+           const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+           const watermarkText = `Downloaded by: ${user?.fullName || user?.displayName || user?.email || 'Student'} | ${new Date().toLocaleString('en-IN')}`;
+           
+           for (const page of pages) {
+             const { width, height } = page.getSize();
+             const textSize = 9;
+             const textWidth = font.widthOfTextAtSize(watermarkText, textSize);
+             page.drawText(watermarkText, {
+               x: width - textWidth - 15,
+               y: height - 20,
+               size: textSize,
+               font: font,
+               color: rgb(0.5, 0.5, 0.5),
+               opacity: 0.4,
+             });
+           }
+           byteArray = await pdfDoc.save();
+        } catch (watermarkErr) {
+           console.warn("Could not add watermark:", watermarkErr);
+        }
 
         try {
            const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
@@ -330,7 +410,7 @@ export function StudentLibrary() {
                      ))}
                      
                      {files.map(item => (
-                        <FileCard key={item.id} item={item} onPreview={() => handleItemClick(item)} formatDate={formatDate} onDownloadChunked={() => handleDownloadChunked(item)} downloadingId={downloadingId} showPath={!!searchQuery} items={items} />
+                        <FileCard key={item.id} item={item} onPreview={() => handleItemClick(item)} formatDate={formatDate} onDownloadChunked={() => handleDownloadChunked(item)} onDownloadUrl={() => handleDownloadUrl(item)} downloadingId={downloadingId} showPath={!!searchQuery} items={items} />
                      ))}
                   </>
               )}
@@ -354,7 +434,7 @@ export function StudentLibrary() {
                        <h3 className="font-black text-xl uppercase mb-4 text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-200 dark:border-zinc-800 pb-2">{dateLabel}</h3>
                        <div className="grid grid-cols-1 gap-4">
                           {itemsInDate.map((item: any) => (
-                             <FileCard key={item.id} item={item} onPreview={() => handleItemClick(item)} formatDate={formatDate} showPath items={items} onDownloadChunked={() => handleDownloadChunked(item)} downloadingId={downloadingId} />
+                             <FileCard key={item.id} item={item} onPreview={() => handleItemClick(item)} formatDate={formatDate} showPath items={items} onDownloadChunked={() => handleDownloadChunked(item)} onDownloadUrl={() => handleDownloadUrl(item)} downloadingId={downloadingId} />
                           ))}
                        </div>
                     </div>
@@ -410,7 +490,7 @@ export function StudentLibrary() {
   );
 }
 
-function FileCard({ item, onPreview, formatDate, showPath, items, onDownloadChunked, downloadingId }: { key?: React.Key, item: LibraryItem, onPreview: () => void, formatDate: (ts: any) => string, showPath?: boolean, items?: LibraryItem[], onDownloadChunked?: () => void, downloadingId?: string | null }) {
+function FileCard({ item, onPreview, formatDate, showPath, items, onDownloadChunked, onDownloadUrl, downloadingId }: { key?: React.Key, item: LibraryItem, onPreview: () => void, formatDate: (ts: any) => string, showPath?: boolean, items?: LibraryItem[], onDownloadChunked?: () => void, onDownloadUrl?: () => void, downloadingId?: string | null }) {
    const renderPath = () => {
       if (!showPath || !items || !item.parentId) return null;
       const getPathStr = (id: string): string => {
@@ -442,7 +522,13 @@ function FileCard({ item, onPreview, formatDate, showPath, items, onDownloadChun
          </div>
          
          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-           {item.type === 'note' && item.contentUrl && (
+           {item.type === 'note' && item.contentUrl && onDownloadUrl && (
+               <button onClick={onDownloadUrl} disabled={downloadingId === item.id} className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-4 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold text-xs hover:-translate-y-0.5 transition-transform whitespace-nowrap shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)]">
+                 {downloadingId === item.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />} 
+                 {downloadingId === item.id ? 'Processing...' : 'Download PDF'}
+               </button>
+           )}
+           {item.type === 'note' && item.contentUrl && !onDownloadUrl && (
                <a href={item.contentUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white px-4 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold text-xs hover:-translate-y-0.5 transition-transform whitespace-nowrap shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)]">
                  <FileDown className="w-3.5 h-3.5" /> View/Download PDF
                </a>

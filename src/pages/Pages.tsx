@@ -41,6 +41,8 @@ export function AdminStudents() {
   const [newStudentEmail, setNewStudentEmail] = useState('');
   const [newStudentBatch, setNewStudentBatch] = useState('');
   const [addingNewStudent, setAddingNewStudent] = useState(false);
+  const [studentTab, setStudentTab] = useState<string>('pending');
+  const [selectedStudentForModal, setSelectedStudentForModal] = useState<AppUser | null>(null);
 
   const handleCreateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,6 +174,56 @@ export function AdminStudents() {
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
       <PageHeader title="Manage Students (Attendance & Settings)" backTo="/admin" />
+
+      {selectedStudentForModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 border-4 border-black p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] max-w-lg w-full relative">
+            <button 
+              onClick={() => setSelectedStudentForModal(null)} 
+              className="absolute top-4 right-4 bg-red-100 text-red-600 p-2 border-2 border-red-600 hover:bg-red-200 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-2xl font-black uppercase mb-6 flex items-center gap-4">
+               {selectedStudentForModal.profilePhotoUrl ? (
+                  <img src={selectedStudentForModal.profilePhotoUrl} alt="Profile" className="w-16 h-16 object-cover border-4 border-black" />
+               ) : (
+                  <div className="w-16 h-16 bg-zinc-200 border-4 border-black flex items-center justify-center text-xs font-bold">N/A</div>
+               )}
+               {selectedStudentForModal.fullName || selectedStudentForModal.displayName || 'Unknown'}
+            </h3>
+            
+            <div className="space-y-4">
+               <div className="bg-zinc-100 dark:bg-zinc-800 p-3 border-2 border-zinc-900 dark:border-zinc-100">
+                 <div className="text-xs font-bold uppercase text-zinc-500">Email</div>
+                 <div className="font-mono mt-1">{selectedStudentForModal.email}</div>
+               </div>
+               
+               <div className="bg-zinc-100 dark:bg-zinc-800 p-3 border-2 border-zinc-900 dark:border-zinc-100 flex gap-4">
+                 <div className="flex-1">
+                   <div className="text-xs font-bold uppercase text-zinc-500">Phone</div>
+                   <div className="font-bold mt-1">{selectedStudentForModal.phone || 'Not provided'}</div>
+                 </div>
+                 <div className="flex-1 border-l-2 border-zinc-300 dark:border-zinc-700 pl-4">
+                   <div className="text-xs font-bold uppercase text-zinc-500">Status</div>
+                   <div className="font-bold mt-1 uppercase text-emerald-600">{selectedStudentForModal.status}</div>
+                 </div>
+               </div>
+
+               <div className="bg-zinc-100 dark:bg-zinc-800 p-3 border-2 border-zinc-900 dark:border-zinc-100">
+                 <div className="text-xs font-bold uppercase text-zinc-500">Home Address</div>
+                 <div className="font-mono mt-1 text-sm">{selectedStudentForModal.address || 'Not provided'}</div>
+               </div>
+               
+               {selectedStudentForModal.joinDate && (
+                 <div className="text-xs font-bold uppercase text-zinc-500 text-right mt-2">
+                   Joined Date: {selectedStudentForModal.joinDate}
+                 </div>
+               )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add New Mock Student Form */}
       <div className="mb-8 bg-zinc-100 dark:bg-zinc-800 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)]">
@@ -346,45 +398,86 @@ export function AdminStudents() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] overflow-x-auto w-full">
-        {loading ? (
-          <div className="flex justify-center p-8"><Loader2 className="animate-spin w-8 h-8" /></div>
-        ) : (
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b-2 border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100">
-                <th className="p-2 font-bold uppercase text-xs">Profile</th>
-                <th className="p-2 font-bold uppercase text-xs">Name / Email</th>
-                <th className="p-2 font-bold uppercase text-xs">Last Active</th>
-                <th className="p-2 font-bold uppercase text-xs hidden md:table-cell">Contact</th>
-                <th className="p-2 font-bold uppercase text-xs">Batch</th>
-                <th className="p-2 font-bold uppercase text-xs">Status</th>
-                <th className="p-2 font-bold uppercase text-xs text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {students.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="p-4 text-center text-zinc-500 font-medium">No students found.</td>
-                </tr>
-              )}
-              {students.map((student) => {
-                const absentDays = getAbsenceDays(studentLastActive[student.uid]);
-                return (
-                <tr key={student.uid} className="border-b border-zinc-200 dark:border-zinc-800">
-                  <td className="p-2">
-                    {student.profilePhotoUrl ? (
-                      <a href={student.profilePhotoUrl} target="_blank" rel="noopener noreferrer">
-                         <img src={student.profilePhotoUrl} alt="Profile" className="w-10 h-10 object-cover border border-zinc-300" />
-                      </a>
-                    ) : (
-                      <div className="w-10 h-10 bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center text-xs font-bold text-zinc-400">N/A</div>
-                    )}
-                  </td>
-                  <td className="p-2">
-                    <div className="font-bold">{student.fullName || student.displayName || 'Unknown'}</div>
-                    <div className="text-xs text-zinc-500">{student.email}</div>
-                  </td>
+      {(() => {
+        const pendingStudents = students.filter(s => s.status === 'pending');
+        const displayStudents = studentTab === 'pending' 
+          ? pendingStudents
+          : studentTab === 'all'
+            ? students.filter(s => s.status === 'active')
+            : students.filter(s => s.status === 'active' && s.batchId === studentTab);
+
+        return (
+          <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] overflow-x-auto w-full">
+            <div className="mb-6 flex overflow-x-auto border-b-4 border-black scrollbar-hide">
+              <button
+                onClick={() => setStudentTab('pending')}
+                className={`px-4 py-3 font-bold text-sm uppercase whitespace-nowrap border-r-4 border-black transition-colors ${
+                  studentTab === 'pending' ? 'bg-yellow-300 text-black' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400'
+                }`}
+              >
+                Approval Requests ({pendingStudents.length})
+              </button>
+              {batches.map(batch => (
+                <button
+                  key={batch.id}
+                  onClick={() => setStudentTab(batch.id)}
+                  className={`px-4 py-3 font-bold text-sm uppercase whitespace-nowrap border-r-4 border-black transition-colors ${
+                    studentTab === batch.id ? 'bg-blue-300 text-black' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400'
+                  }`}
+                >
+                  {batch.name}
+                </button>
+              ))}
+              <button
+                onClick={() => setStudentTab('all')}
+                className={`px-4 py-3 font-bold text-sm uppercase whitespace-nowrap border-r-4 border-black transition-colors ${
+                  studentTab === 'all' ? 'bg-purple-300 text-black' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400'
+                }`}
+              >
+                All Active
+              </button>
+            </div>
+
+            {loading ? (
+              <div className="flex justify-center p-8"><Loader2 className="animate-spin w-8 h-8" /></div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b-2 border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100">
+                    <th className="p-2 font-bold uppercase text-xs">Profile</th>
+                    <th className="p-2 font-bold uppercase text-xs">Name / Email</th>
+                    <th className="p-2 font-bold uppercase text-xs">Last Active</th>
+                    <th className="p-2 font-bold uppercase text-xs hidden md:table-cell">Contact</th>
+                    <th className="p-2 font-bold uppercase text-xs">Batch</th>
+                    <th className="p-2 font-bold uppercase text-xs">Status</th>
+                    <th className="p-2 font-bold uppercase text-xs text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayStudents.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-4 text-center text-zinc-500 font-medium">No students found in this category.</td>
+                    </tr>
+                  )}
+                  {displayStudents.map((student) => {
+                    const absentDays = getAbsenceDays(studentLastActive[student.uid]);
+                    return (
+                    <tr key={student.uid} className="border-b border-zinc-200 dark:border-zinc-800">
+                      <td className="p-2">
+                        {student.profilePhotoUrl ? (
+                          <a href={student.profilePhotoUrl} target="_blank" rel="noopener noreferrer">
+                             <img src={student.profilePhotoUrl} alt="Profile" className="w-10 h-10 object-cover border border-zinc-300" />
+                          </a>
+                        ) : (
+                          <div className="w-10 h-10 bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center text-xs font-bold text-zinc-400">N/A</div>
+                        )}
+                      </td>
+                      <td className="p-2">
+                        <div className="font-bold cursor-pointer hover:underline text-blue-600 dark:text-blue-400" onClick={() => setSelectedStudentForModal(student)}>
+                          {student.fullName || student.displayName || 'Unknown'}
+                        </div>
+                        <div className="text-xs text-zinc-500">{student.email}</div>
+                      </td>
                   <td className="p-2">
                     {absentDays === Infinity ? (
                       <span className="text-xs font-bold text-zinc-400 uppercase">Never tested</span>
@@ -426,37 +519,39 @@ export function AdminStudents() {
                       {student.status}
                     </span>
                   </td>
-                  <td className="p-2 text-right">
-                    <div className="flex justify-end gap-2">
-                      {student.status === 'pending' && (
-                        <>
-                          <button onClick={() => handleStatusChange(student.uid, 'active')} className="p-1 px-2 border-2 border-emerald-600 bg-emerald-500 text-white font-bold text-xs uppercase hover:-translate-y-0.5 transition-transform" title="Approve">
-                            Approve
-                          </button>
-                          <button onClick={() => handleStatusChange(student.uid, 'rejected')} className="p-1 px-2 border-2 border-red-600 bg-red-500 text-white font-bold text-xs uppercase hover:-translate-y-0.5 transition-transform" title="Reject">
-                            Reject
-                          </button>
-                        </>
-                      )}
-                      
-                      {confirmDeleteStudentId === student.uid ? (
-                         <div className="flex gap-1">
-                           <button onClick={() => { handleDeleteStudent(student.uid); setConfirmDeleteStudentId(null); }} className="p-1 px-2 border-2 border-red-600 bg-red-600 text-white font-bold text-[10px] uppercase">Yes</button>
-                           <button onClick={() => setConfirmDeleteStudentId(null)} className="p-1 px-2 border-2 border-zinc-500 bg-zinc-200 text-black font-bold text-[10px] uppercase">No</button>
-                         </div>
-                      ) : (
-                         <button onClick={() => setConfirmDeleteStudentId(student.uid)} className="p-1 px-2 border-2 border-red-600 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold text-xs uppercase hover:-translate-y-0.5 transition-transform flex items-center justify-center" title="Delete Student">
-                           <Trash2 className="w-3.5 h-3.5" />
-                         </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )})}
-            </tbody>
-          </table>
-        )}
-      </div>
+                      <td className="p-2 text-right">
+                        <div className="flex justify-end gap-2">
+                          {student.status === 'pending' && (
+                            <>
+                              <button onClick={() => { handleStatusChange(student.uid, 'active'); setStudentTab(student.batchId || 'all'); }} className="p-1 px-2 border-2 border-emerald-600 bg-emerald-500 text-white font-bold text-xs uppercase hover:-translate-y-0.5 transition-transform" title="Approve">
+                                Approve
+                              </button>
+                              <button onClick={() => handleStatusChange(student.uid, 'rejected')} className="p-1 px-2 border-2 border-red-600 bg-red-500 text-white font-bold text-xs uppercase hover:-translate-y-0.5 transition-transform" title="Reject">
+                                Reject
+                              </button>
+                            </>
+                          )}
+                          
+                          {confirmDeleteStudentId === student.uid ? (
+                             <div className="flex gap-1">
+                               <button onClick={() => { handleDeleteStudent(student.uid); setConfirmDeleteStudentId(null); }} className="p-1 px-2 border-2 border-red-600 bg-red-600 text-white font-bold text-[10px] uppercase">Yes</button>
+                               <button onClick={() => setConfirmDeleteStudentId(null)} className="p-1 px-2 border-2 border-zinc-500 bg-zinc-200 text-black font-bold text-[10px] uppercase">No</button>
+                             </div>
+                          ) : (
+                             <button onClick={() => setConfirmDeleteStudentId(student.uid)} className="p-1 px-2 border-2 border-red-600 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold text-xs uppercase hover:-translate-y-0.5 transition-transform flex items-center justify-center" title="Delete Student">
+                               <Trash2 className="w-3.5 h-3.5" />
+                             </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )})}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -7,7 +7,9 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useAuth, AuthContext } from './components/AuthProvider';
 import { useTheme } from './components/ThemeProvider';
-import { Moon, Sun, LogIn, Loader2 } from 'lucide-react';
+import { Moon, Sun, LogIn, Loader2, MoreVertical, LogOut, Edit, X } from 'lucide-react';
+import { db } from './lib/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 import { AdminStudents, AdminPayments, StudentPayments, AdminBatches, PageHeader } from './pages/Pages';
 import { AdminLibrary } from './pages/AdminLibrary';
 import { AdminResults } from './pages/AdminResults';
@@ -79,6 +81,38 @@ function Login() {
 function TopNav() {
   const { theme, setTheme } = useTheme();
   const { user, signOut } = useAuth();
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [editAddress, setEditAddress] = useState('');
+  const [savingAddress, setSavingAddress] = useState(false);
+
+  const handleEditProfileOpen = () => {
+    setEditAddress(user?.address || '');
+    setShowDropdown(false);
+    setShowEditProfile(true);
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setSavingAddress(true);
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        address: editAddress
+      });
+      // The auth context might not update automatically for this specific field since it pulls from users collection.
+      // But let's assume it does via onSnapshot, or we rely on a page refresh. 
+      // Actually AuthProvider uses onSnapshot. So it's real-time.
+      setShowEditProfile(false);
+      window.dispatchEvent(new CustomEvent('show-custom-alert', { detail: 'Profile updated successfully!' }));
+    } catch (err) {
+      console.error(err);
+      window.dispatchEvent(new CustomEvent('show-custom-alert', { detail: 'Failed to update profile.' }));
+    } finally {
+      setSavingAddress(false);
+    }
+  };
 
   return (
     <nav className="flex justify-between items-center bg-white dark:bg-zinc-900 border-b-2 border-zinc-900 dark:border-zinc-100 p-4 sticky top-0 z-10">
@@ -101,14 +135,102 @@ function TopNav() {
           {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
         {user && (
-           <button 
-            onClick={signOut}
-            className="text-xs font-bold uppercase hover:underline"
-           >
-             Logout
-           </button>
+           <div className="relative">
+             <button 
+              onClick={() => setShowDropdown(!showDropdown)}
+              className="p-2 border-2 border-zinc-900 dark:border-zinc-100 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+             >
+               <MoreVertical className="w-4 h-4" />
+             </button>
+             {showDropdown && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowDropdown(false)}></div>
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] z-50 py-1">
+                    <button 
+                      onClick={handleEditProfileOpen}
+                      className="w-full text-left px-4 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-bold text-sm uppercase"
+                    >
+                      <Edit className="w-4 h-4" /> Edit Profile
+                    </button>
+                    <button 
+                      onClick={() => { setShowDropdown(false); setShowLogoutConfirm(true); }}
+                      className="w-full text-left px-4 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-bold text-sm uppercase text-red-600 dark:text-red-400"
+                    >
+                      <LogOut className="w-4 h-4" /> Logout
+                    </button>
+                  </div>
+                </>
+             )}
+           </div>
         )}
       </div>
+
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+           <div className="bg-white dark:bg-zinc-900 border-4 border-red-600 dark:border-red-500 p-6 max-w-sm w-full shadow-[8px_8px_0px_0px_rgba(220,38,38,1)] relative">
+             <h3 className="font-black text-xl uppercase mb-4 text-red-600 border-b-2 border-red-200 dark:border-red-900 pb-2 flex items-center gap-2">
+               <LogOut className="w-6 h-6" /> Confirm Logout
+             </h3>
+             <p className="font-bold text-sm text-zinc-700 dark:text-zinc-300 mb-6">Are you sure you want to log out?</p>
+             <div className="flex gap-4">
+               <button 
+                 onClick={() => setShowLogoutConfirm(false)}
+                 className="flex-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-bold border-2 border-zinc-900 dark:border-zinc-100 py-2 hover:-translate-y-0.5 transition-transform shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)]"
+               >
+                 Cancel
+               </button>
+               <button 
+                 onClick={signOut}
+                 className="flex-1 bg-red-600 text-white font-black uppercase py-2 hover:-translate-y-0.5 transition-transform border-2 border-red-800 shadow-[2px_2px_0px_0px_rgba(153,27,27,1)]"
+               >
+                 Log out
+               </button>
+             </div>
+           </div>
+        </div>
+      )}
+
+      {showEditProfile && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+           <div className="bg-white dark:bg-zinc-900 border-4 border-black dark:border-zinc-100 p-6 max-w-lg w-full shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] relative">
+             <button 
+                onClick={() => setShowEditProfile(false)}
+                className="absolute top-4 right-4 bg-red-100 text-red-600 p-2 border-2 border-red-600 hover:bg-red-200 transition-colors"
+                disabled={savingAddress}
+             >
+                <X className="w-5 h-5" />
+             </button>
+             <h3 className="font-black text-2xl uppercase mb-6 flex items-center gap-2">
+               <Edit className="w-6 h-6" /> Edit Profile
+             </h3>
+             <form onSubmit={handleSaveProfile} className="space-y-4">
+               <div>
+                  <label className="block text-xs font-bold uppercase mb-1 text-zinc-500">Address Details</label>
+                  <textarea
+                     required
+                     rows={3}
+                     value={editAddress}
+                     onChange={(e) => setEditAddress(e.target.value)}
+                     className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-3 bg-transparent focus:outline-none focus:border-zinc-500 dark:focus:border-zinc-400 font-medium font-mono text-sm resize-none"
+                     placeholder="Enter your full address"
+                     disabled={savingAddress}
+                  ></textarea>
+                  <p className="text-[10px] uppercase font-bold text-emerald-500 mt-2">More edit options (e.g., photo upload) will be available later.</p>
+               </div>
+               <div className="pt-4 flex justify-end">
+                 <button 
+                   type="submit"
+                   disabled={savingAddress}
+                   className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-black uppercase py-3 px-6 hover:-translate-y-0.5 transition-transform border-2 border-transparent shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] flex items-center gap-2 disabled:opacity-50"
+                 >
+                   {savingAddress && <Loader2 className="w-4 h-4 animate-spin" />}
+                   Save Profile
+                 </button>
+               </div>
+             </form>
+           </div>
+        </div>
+      )}
     </nav>
   );
 }

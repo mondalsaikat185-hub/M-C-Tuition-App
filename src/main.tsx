@@ -10,7 +10,7 @@ setupAlertPolyfill();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemeProvider defaultTheme="light" storageKey="tuition-theme">
+    <ThemeProvider defaultTheme="dark" storageKey="tuition-theme">
       <AuthProvider>
         <App />
       </AuthProvider>
