@@ -44,7 +44,7 @@ function ProtectedRoute({ children, adminOnly = false }: { children: React.React
   }
 
   // Block access to student materials if pending
-  if (user.role === 'student' && user.status === 'pending' && window.location.pathname !== '/student') {
+  if (user.role === 'student' && user.status === 'pending' && window.location.pathname !== '/student' && window.location.pathname !== '/setup-profile') {
     return <Navigate to="/student" />;
   }
 
