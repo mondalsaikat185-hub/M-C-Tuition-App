@@ -16,6 +16,26 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   const [resultSummary, setResultSummary] = useState<{ score: number, total: number, correct: number, wrong: number, skipped: number } | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
 
+  // Auto-resume if there is an active valid quiz session in localStorage
+  useEffect(() => {
+     if (isPreview) return;
+     const endTime = localStorage.getItem(`quiz_endtime_${exam.id}`);
+     if (endTime) {
+        const remaining = Math.max(0, Math.floor((parseInt(endTime) - Date.now()) / 1000));
+        if (remaining > 0) {
+           setAgreed(true);
+           setScreen('QUIZ');
+           const saved = localStorage.getItem(`quiz_answers_${exam.id}`);
+           if (saved) {
+             try { setUserAnswers(JSON.parse(saved)); } catch (e) {}
+           }
+        } else {
+           setAgreed(true);
+           setScreen('QUIZ');
+        }
+     }
+  }, [exam.id, isPreview]);
+
   const userAnswersRef = useRef(userAnswers);
   useEffect(() => {
     userAnswersRef.current = userAnswers;

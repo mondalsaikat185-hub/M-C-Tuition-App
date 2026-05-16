@@ -132,5 +132,15 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly(['presentStudentIds', 'updatedAt']);
       allow delete: if isAdmin();
     }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (incoming().senderId == request.auth.uid);
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['readers'])
+      );
+      allow delete: if isAdmin();
+    }
   }
 }

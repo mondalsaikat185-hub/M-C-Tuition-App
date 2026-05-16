@@ -7,9 +7,9 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { useAuth, AuthContext } from './components/AuthProvider';
 import { useTheme } from './components/ThemeProvider';
-import { Moon, Sun, LogIn, Loader2, MoreVertical, LogOut, Edit, X } from 'lucide-react';
+import { Moon, Sun, LogIn, Loader2, MoreVertical, LogOut, Edit, X, Bell } from 'lucide-react';
 import { db } from './lib/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, onSnapshot, where, getDocs, limit, orderBy, serverTimestamp, getDoc } from 'firebase/firestore';
 import { AdminStudents, AdminPayments, StudentPayments, AdminBatches, PageHeader } from './pages/Pages';
 import { AdminLibrary } from './pages/AdminLibrary';
 import { AdminResults } from './pages/AdminResults';
@@ -78,14 +78,36 @@ function Login() {
   );
 }
 
+import { NotificationsPanel } from './components/NotificationsPanel';
+
 function TopNav() {
   const { theme, setTheme } = useTheme();
   const { user, signOut } = useAuth();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [editAddress, setEditAddress] = useState('');
   const [savingAddress, setSavingAddress] = useState(false);
+
+  useEffect(() => {
+     if (!user) return;
+     const q = query(collection(db, 'notifications'));
+     const unsub = onSnapshot(q, (snap) => {
+        let notifs = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
+        if (user.role === 'student') {
+           notifs = notifs.filter((n: any) => 
+              n.senderId === user.uid ||
+              n.type === 'admin_to_all' ||
+              (n.type === 'admin_to_batch' && n.batchId === (user as any).batchId)
+           );
+        }
+        const unread = notifs.filter((n: any) => n.senderId !== user.uid && !(n.readers || []).includes(user.uid)).length;
+        setUnreadCount(unread);
+     });
+     return () => unsub();
+  }, [user]);
 
   const handleEditProfileOpen = () => {
     setEditAddress(user?.address || '');
@@ -135,7 +157,19 @@ function TopNav() {
           {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
         {user && (
-           <div className="relative">
+           <>
+             <button 
+               onClick={() => setShowNotifications(true)}
+               className="p-2 border-2 border-zinc-900 dark:border-zinc-100 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors relative"
+             >
+               <Bell className="w-4 h-4" />
+               {unreadCount > 0 && (
+                 <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-bounce">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                 </span>
+               )}
+             </button>
+             <div className="relative">
              <button 
               onClick={() => setShowDropdown(!showDropdown)}
               className="p-2 border-2 border-zinc-900 dark:border-zinc-100 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
@@ -162,6 +196,7 @@ function TopNav() {
                 </>
              )}
            </div>
+           </>
         )}
       </div>
 
@@ -230,6 +265,10 @@ function TopNav() {
              </form>
            </div>
         </div>
+      )}
+
+      {showNotifications && (
+        <NotificationsPanel onClose={() => setShowNotifications(false)} />
       )}
     </nav>
   );
@@ -405,8 +444,6 @@ function AdminDashboard() {
   );
 }
 
-import { collection, query, where, getDocs, limit, orderBy, doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
-import { db } from './lib/firebase';
 import { Exam, Note, Payment } from './pages/Pages';
 
 function StudentDashboard() {

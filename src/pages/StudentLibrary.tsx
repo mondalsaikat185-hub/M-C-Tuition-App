@@ -7,6 +7,7 @@ import { useAuth } from '../components/AuthProvider';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
 import { LibraryItem } from './AdminLibrary';
 import { verifyAndJoinSession, joinSessionWithoutCode } from '../lib/exam-session-utils';
+import { useSearchParams } from 'react-router-dom';
 
 export function StudentLibrary() {
   const { user } = useAuth();
@@ -14,11 +15,32 @@ export function StudentLibrary() {
   const [loading, setLoading] = useState(true);
   
   // Navigation
-  // Mode can be 'folders' or 'latest'
-  const [viewMode, setViewMode] = useState<'folders' | 'latest'>('folders');
-  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewMode = (searchParams.get('mode') as 'folders' | 'latest') || 'folders';
+  const currentFolderId = searchParams.get('folder') || null;
+  const previewId = searchParams.get('preview') || null;
+  const previewItem = items.find(i => i.id === previewId) || null;
+
+  const setViewMode = (mode: 'folders' | 'latest') => {
+    setSearchParams(prev => { prev.set('mode', mode); return prev; });
+  };
   
-  const [previewItem, setPreviewItem] = useState<LibraryItem | null>(null);
+  const setCurrentFolderId = (id: string | null) => {
+    setSearchParams(prev => { 
+       if (id) prev.set('folder', id); 
+       else prev.delete('folder'); 
+       return prev; 
+    });
+  };
+
+  const setPreviewItem = (item: LibraryItem | null) => {
+    setSearchParams(prev => {
+       if (item && item.id) prev.set('preview', item.id);
+       else prev.delete('preview');
+       return prev;
+    });
+  };
+  
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -101,7 +123,7 @@ export function StudentLibrary() {
         if (!res.ok) throw new Error("Fetch failed");
         const arrayBuffer = await res.arrayBuffer();
         
-        let byteArray = new Uint8Array(arrayBuffer);
+        let byteArray: any = new Uint8Array(arrayBuffer);
         try {
            const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
            const pdfDoc = await PDFDocument.load(byteArray);
@@ -166,7 +188,7 @@ export function StudentLibrary() {
         for (let i = 0; i < byteCharacters.length; i++) {
             byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
-        let byteArray = new Uint8Array(byteNumbers);
+        let byteArray: any = new Uint8Array(byteNumbers);
 
         try {
            const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
@@ -251,7 +273,14 @@ export function StudentLibrary() {
        const activeSessionDoc = activeSessionDocs[0];
        const activeSession = activeSessionDoc.data();
 
-       // Always require code for active sessions based on user request "anyone who wants to take the exam must enter the code"
+       // Check if already a participant
+       const participants = activeSession.participants || [];
+       if (participants.includes(user.uid)) {
+          setPreviewItem(item);
+          return;
+       }
+
+       // Require code for new participant
        setCodeInputItem(item);
        setEnteredCode('');
        setCodeError('');
