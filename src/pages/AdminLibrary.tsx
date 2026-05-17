@@ -296,6 +296,27 @@ export function AdminLibrary() {
      }
   };
 
+  const handleLinkUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+     let val = e.target.value;
+     
+     // Auto convert standard Google Drive link to direct download link
+     const driveRegex = /\/file\/d\/([a-zA-Z0-9_-]+)/;
+     const idRegex = /[?&]id=([a-zA-Z0-9_-]+)/;
+     
+     let fileId = null;
+     if (driveRegex.test(val)) {
+        fileId = val.match(driveRegex)?.[1];
+     } else if (idRegex.test(val)) {
+        fileId = val.match(idRegex)?.[1];
+     }
+     
+     if (fileId) {
+         val = `https://drive.google.com/uc?export=download&id=${fileId}`;
+     }
+     
+     setLinkUrl(val);
+  };
+
   const handleUploadSubmit = async (e: React.FormEvent) => {
      e.preventDefault();
      try {
@@ -961,8 +982,8 @@ export function AdminLibrary() {
                         </div>
                         <div>
                            <label className="block text-xs font-bold uppercase mb-1">Direct PDF Link</label>
-                           <p className="text-xs text-zinc-500 mb-2">Use Google Drive or AWS S3 direct links to save database consumption. The link will be opened directly.</p>
-                           <input type="url" value={linkUrl} onChange={e => setLinkUrl(e.target.value)} className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none" placeholder="https://..." />
+                           <p className="text-xs text-zinc-500 mb-2">You can paste normal Google Drive links here, it will automatically be converted to a direct download link to save database consumption. The link will be opened directly.</p>
+                           <input type="url" value={linkUrl} onChange={handleLinkUrlChange} className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none" placeholder="https://..." />
                         </div>
                         <div>
                            <label className="block text-xs font-bold uppercase mb-1">PDF Password (Optional)</label>

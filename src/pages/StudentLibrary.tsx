@@ -195,8 +195,17 @@ export function StudentLibrary() {
      if (!item.contentUrl || !item.id) return;
      try {
         setDownloadingId(item.id);
-        const res = await fetch(item.contentUrl);
-        if (!res.ok) throw new Error("Fetch failed");
+        
+        let targetUrl = item.contentUrl;
+        let res = await fetch(targetUrl).catch(() => null);
+        
+        // If Direct Fetch fails (likely CORS from Google Drive), try a CORS Proxy
+        if (!res || !res.ok) {
+           const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(item.contentUrl)}`;
+           res = await fetch(proxyUrl);
+           if (!res.ok) throw new Error("CORS Proxy Fetch failed");
+        }
+        
         const arrayBuffer = await res.arrayBuffer();
         
         let byteArray: any = new Uint8Array(arrayBuffer);
@@ -238,9 +247,9 @@ export function StudentLibrary() {
         link.href = URL.createObjectURL(blob);
         link.download = item.fileName || 'note.pdf';
         link.click();
-     } catch (e) {
-        console.error("Direct download with watermark failed. Opening directly.", e);
-        window.open(item.contentUrl, '_blank');
+     } catch (e: any) {
+        console.error("Direct download with watermark failed.", e);
+        alert("ডাউনলোড করতে সমস্যা হচ্ছে। অনুগ্রহ করে আপনার ইন্টারনেট কানেকশন চেক করুন এবং আবার চেষ্টা করুন। সমস্যা চলতে থাকলে ডেস্কটপ ব্রাউজার ব্যবহার করুন।");
      } finally {
         setDownloadingId(null);
      }
