@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, where, doc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, getDocs, where, doc, getDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { PageHeader } from './Pages';
 import { Loader2, Eye, FileText, FileDown, BookOpen, Folder, ChevronRight, Clock, Search, FolderOpen } from 'lucide-react';
 import { useAuth } from '../components/AuthProvider';
@@ -50,70 +50,146 @@ export function StudentLibrary() {
   const [codeError, setCodeError] = useState('');
   const [codeLoading, setCodeLoading] = useState(false);
 
+  const [weeksToShow, setWeeksToShow] = useState(2);
+  const [allAssigns, setAllAssigns] = useState<any[]>([]);
+  const [libraryCache, setLibraryCache] = useState<Map<string, LibraryItem>>(new Map());
+  const [fetchedFolders, setFetchedFolders] = useState<Set<string>>(new Set());
+
   useEffect(() => {
-    const fetchData = async () => {
-      if (!user?.batchId) {
-         setLoading(false);
-         return;
-      }
-      try {
-        setLoading(true);
-        // 1. Fetch Assignments for this batch
-        const assignQ = query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId));
-        const assignSnaps = await getDocs(assignQ);
-        const assignedIds = new Set<string>();
-        assignSnaps.forEach(d => assignedIds.add(d.data().libraryItemId));
+    if (!user?.batchId) {
+       setLoading(false);
+       return;
+    }
+    setLoading(true);
 
-        // 2. Fetch all library items
-        const libQ = query(collection(db, 'library'));
-        const libSnaps = await getDocs(libQ);
-        const allItems: LibraryItem[] = [];
-        libSnaps.forEach(d => allItems.push({ id: d.id, ...d.data() } as LibraryItem));
+    const assignUnsub = onSnapshot(query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId)), (assignSnaps) => {
+       const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()}));
+       assigns.sort((a,b) => {
+           const tA = a.assignedAt?.toMillis() || 0;
+           const tB = b.assignedAt?.toMillis() || 0;
+           return tB - tA;
+       });
+       setAllAssigns(assigns);
+    }, (err) => {
+       console.error(err);
+       setLoading(false);
+    });
 
-        // 3. Resolve accessible IDs
-        const accessibleIds = new Set<string>();
-        
-        // Helper: add item and its descendants
-        const addWithDescendants = (parentId: string) => {
-           accessibleIds.add(parentId);
-           const children = allItems.filter(i => i.parentId === parentId);
-           for (const c of children) {
-              addWithDescendants(c.id);
-           }
-        };
-
-        // Add explicit assignments and their descendants
-        for (const id of assignedIds) {
-           addWithDescendants(id);
-        }
-
-        // Helper: add ancestors
-        const addAncestors = (itemId: string) => {
-           const item = allItems.find(i => i.id === itemId);
-           if (item?.parentId) {
-              accessibleIds.add(item.parentId);
-              addAncestors(item.parentId);
-           }
-        };
-
-        // Ensure ancestors of accessible items are also accessible (so folders show up)
-        // We iterate over an array of currently accessible IDs to prevent infinite loops if data is malformed
-        const currentAccessible = Array.from(accessibleIds);
-        for (const id of currentAccessible) {
-           addAncestors(id);
-        }
-
-        const filteredItems = allItems.filter(i => accessibleIds.has(i.id));
-        setItems(filteredItems);
-
-      } catch (err) {
-        console.error("Error fetching library", err);
-      } finally {
-        setLoading(false);
-      }
+    return () => {
+       assignUnsub();
     };
-    fetchData();
   }, [user]);
+
+  useEffect(() => {
+    const processVisibleItems = async () => {
+        if (allAssigns.length === 0) {
+           setLoading(false);
+           setItems([]);
+           return;
+        }
+
+        const cutoff = Date.now() - (weeksToShow * 7 * 24 * 60 * 60 * 1000);
+        
+        const visibleAssigns = allAssigns.filter(a => {
+           const t = a.assignedAt?.toMillis() || 0;
+           return t === 0 || t >= cutoff; // t===0 includes legacy without timestamp
+        });
+
+        const neededRootIds = Array.from(new Set<string>(visibleAssigns.map(a => a.libraryItemId)));
+        
+        // Use functional state update to ensure we have the very latest cache
+        let currentCache = new Map();
+        setLibraryCache(prev => { currentCache = new Map(prev); return prev; });
+        
+        const missingIds = neededRootIds.filter(id => !currentCache.has(id));
+
+        if (missingIds.length > 0) {
+           setLoading(true);
+           let currentIdsToCheck = [...missingIds];
+           while (currentIdsToCheck.length > 0) {
+               const chunks = [];
+               for (let i = 0; i < currentIdsToCheck.length; i += 30) {
+                   chunks.push(currentIdsToCheck.slice(i, i + 30));
+               }
+               
+               const nextIds = new Set<string>();
+               for (const chunk of chunks) {
+                   try {
+                     const q = query(collection(db, 'library'), where('__name__', 'in', chunk));
+                     const snaps = await getDocs(q);
+                     snaps.forEach(snap => {
+                        const data = { id: snap.id, ...snap.data() } as LibraryItem;
+                        currentCache.set(data.id, data);
+                        if (data.parentId && !currentCache.has(data.parentId)) {
+                            nextIds.add(data.parentId);
+                        }
+                     });
+                   } catch (err) {
+                     console.error("Chunk fetch error:", err);
+                   }
+               }
+               currentIdsToCheck = Array.from(nextIds);
+           }
+           setLibraryCache(currentCache);
+        }
+        
+        const accessible = new Set<string>();
+        for (const id of neededRootIds) {
+            accessible.add(id);
+        }
+        
+        // Add loaded descendants of accessible folders
+        const addLoadedChildren = (parentId: string) => {
+            const children = Array.from(currentCache.values()).filter(i => i.parentId === parentId);
+            for (const c of children) {
+                accessible.add(c.id);
+                addLoadedChildren(c.id);
+            }
+        };
+        for (const id of Array.from(accessible)) {
+            addLoadedChildren(id);
+        }
+
+        // Add ancestors to visibility
+        const addAncestors = (itemId: string) => {
+            const item = currentCache.get(itemId);
+            if (item?.parentId) {
+                accessible.add(item.parentId);
+                addAncestors(item.parentId);
+            }
+        };
+        for (const id of Array.from(accessible)) {
+            addAncestors(id);
+        }
+
+        const filteredItems = Array.from(currentCache.values()).filter(i => accessible.has(i.id));
+        setItems(filteredItems);
+        setLoading(false);
+    };
+
+    processVisibleItems();
+  }, [allAssigns, weeksToShow]); // Don't include libraryCache to prevent infinite loop
+
+  const handleOpenFolder = async (folderId: string | null) => {
+      setCurrentFolderId(folderId);
+      if (folderId && !fetchedFolders.has(folderId)) {
+          setLoading(true);
+          try {
+             const q = query(collection(db, 'library'), where('parentId', '==', folderId));
+             const snaps = await getDocs(q);
+             const newCache = new Map(libraryCache);
+             snaps.forEach(snap => {
+                newCache.set(snap.id, { id: snap.id, ...snap.data() } as LibraryItem);
+             });
+             setLibraryCache(newCache);
+             setFetchedFolders(f => new Set(f).add(folderId));
+          } catch(err) {
+             console.error("Folder fetch error", err);
+          } finally {
+             setLoading(false);
+          }
+      }
+  };
 
   const handleDownloadUrl = async (item: LibraryItem) => {
      if (!item.contentUrl || !item.id) return;
@@ -412,13 +488,13 @@ export function StudentLibrary() {
       ) : viewMode === 'folders' ? (
           <>
             <div className="flex gap-2 items-center mb-6 overflow-x-auto text-sm font-bold pb-2 text-zinc-600 dark:text-zinc-400">
-               <button onClick={() => setCurrentFolderId(null)} className="hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1 shrink-0">
+               <button onClick={() => handleOpenFolder(null)} className="hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1 shrink-0">
                   <Folder className="w-4 h-4"/> Home
                </button>
                {breadcrumbs.map(bc => (
                    <React.Fragment key={bc.id}>
                       <ChevronRight className="w-4 h-4 shrink-0" />
-                      <button onClick={() => setCurrentFolderId(bc.id)} className="hover:text-zinc-900 dark:hover:text-zinc-100 shrink-0">
+                      <button onClick={() => handleOpenFolder(bc.id)} className="hover:text-zinc-900 dark:hover:text-zinc-100 shrink-0">
                          {bc.title}
                       </button>
                    </React.Fragment>
@@ -433,7 +509,7 @@ export function StudentLibrary() {
                      {folders.map(folder => (
                         <div key={folder.id} 
                              className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors" 
-                             onClick={() => setCurrentFolderId(folder.id)}>
+                             onClick={() => handleOpenFolder(folder.id)}>
                            <div className="flex items-center gap-3 w-full">
                               <Folder className="w-6 h-6 text-blue-500 shrink-0" fill="currentColor" />
                               <h4 className="font-black text-lg truncate flex-1">{folder.title}</h4>
@@ -449,6 +525,15 @@ export function StudentLibrary() {
                      ))}
                   </>
               )}
+            </div>
+            
+            <div className="flex justify-center mt-4">
+                <button 
+                   onClick={() => setWeeksToShow(w => w + 2)}
+                   className="px-6 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold bg-white dark:bg-zinc-900 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:hover:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)] transition-all"
+                >
+                   Load Older Materials
+                </button>
             </div>
           </>
       ) : (
@@ -475,6 +560,15 @@ export function StudentLibrary() {
                     </div>
                  ))
              )}
+             
+             <div className="flex justify-center mt-4">
+                <button 
+                   onClick={() => setWeeksToShow(w => w + 2)}
+                   className="px-6 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold bg-white dark:bg-zinc-900 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:hover:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)] transition-all"
+                >
+                   Load Older Materials
+                </button>
+             </div>
           </div>
       )}
 

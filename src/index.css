@@ -2,3 +2,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
+body {
+  overscroll-behavior-y: none;
+}

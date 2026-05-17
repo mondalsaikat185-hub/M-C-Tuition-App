@@ -134,8 +134,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               await updateDoc(userRef, updates);
             }
           }
-        } catch (error) {
-          console.error('AuthProvider setup error:', error);
+        } catch (error: any) {
+          if (error?.message?.includes('Quota') || error?.code === 'resource-exhausted') {
+             console.error('AuthProvider setup error:', error);
+             alert('ডেটাবেস এর আজকের ফ্রি লিমিট শেষ (Quota Exceeded)।\n\nঅনুগ্রহ করে আগামীকাল দুপুর ১টা পর্যন্ত অপেক্ষা করুন, অথবা Firebase Console (Usage tab) চেক করুন।');
+          } else if (error?.message?.includes('offline') || error?.code === 'unavailable' || error?.message?.includes('network')) {
+             console.log('Client offline, initial setup failed.');
+          } else {
+             console.error('AuthProvider setup error:', error);
+          }
         }
 
         // Listen for real-time updates
@@ -153,9 +160,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(data);
           }
           setLoading(false);
-        }, (error) => {
+        }, (error: any) => {
           console.error('User snapshot error:', error);
           setLoading(false);
+          if (error?.message?.includes('Quota') || error?.code === 'resource-exhausted') {
+             alert('ডেটাবেস এর আজকের ফ্রি লিমিট শেষ (Quota Exceeded)।\n\nঅনুগ্রহ করে আগামীকাল দুপুর ১টা পর্যন্ত অপেক্ষা করুন।');
+          } else if (error?.message?.includes('offline') || error?.code === 'unavailable') {
+             // Silently ignore offline error in snapshot to avoid spam
+             console.log("Client offline, snapshot failed.");
+          }
         });
 
       } else {

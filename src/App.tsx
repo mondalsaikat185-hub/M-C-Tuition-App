@@ -89,10 +89,12 @@ function TopNav() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [editAddress, setEditAddress] = useState('');
-  const [savingAddress, setSavingAddress] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
 
   useEffect(() => {
      if (!user) return;
+
      const q = query(collection(db, 'notifications'));
      const unsub = onSnapshot(q, (snap) => {
         let notifs = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
@@ -110,6 +112,7 @@ function TopNav() {
   }, [user]);
 
   const handleEditProfileOpen = () => {
+    setEditName(user?.fullName || user?.displayName || '');
     setEditAddress(user?.address || '');
     setShowDropdown(false);
     setShowEditProfile(true);
@@ -118,9 +121,10 @@ function TopNav() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    setSavingAddress(true);
+    setSavingProfile(true);
     try {
       await updateDoc(doc(db, 'users', user.uid), {
+        fullName: editName,
         address: editAddress
       });
       // The auth context might not update automatically for this specific field since it pulls from users collection.
@@ -132,7 +136,7 @@ function TopNav() {
       console.error(err);
       window.dispatchEvent(new CustomEvent('show-custom-alert', { detail: 'Failed to update profile.' }));
     } finally {
-      setSavingAddress(false);
+      setSavingProfile(false);
     }
   };
 
@@ -240,6 +244,18 @@ function TopNav() {
              </h3>
              <form onSubmit={handleSaveProfile} className="space-y-4">
                <div>
+                  <label className="block text-xs font-bold uppercase mb-1 text-zinc-500">Full Name</label>
+                  <input
+                     required
+                     type="text"
+                     value={editName}
+                     onChange={(e) => setEditName(e.target.value)}
+                     className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-3 bg-transparent focus:outline-none focus:border-zinc-500 dark:focus:border-zinc-400 font-medium font-mono text-sm"
+                     placeholder="Enter your full name"
+                     disabled={savingProfile}
+                  />
+               </div>
+               <div>
                   <label className="block text-xs font-bold uppercase mb-1 text-zinc-500">Address Details</label>
                   <textarea
                      required
@@ -248,17 +264,17 @@ function TopNav() {
                      onChange={(e) => setEditAddress(e.target.value)}
                      className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-3 bg-transparent focus:outline-none focus:border-zinc-500 dark:focus:border-zinc-400 font-medium font-mono text-sm resize-none"
                      placeholder="Enter your full address"
-                     disabled={savingAddress}
+                     disabled={savingProfile}
                   ></textarea>
                   <p className="text-[10px] uppercase font-bold text-emerald-500 mt-2">More edit options (e.g., photo upload) will be available later.</p>
                </div>
                <div className="pt-4 flex justify-end">
                  <button 
                    type="submit"
-                   disabled={savingAddress}
+                   disabled={savingProfile}
                    className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-black uppercase py-3 px-6 hover:-translate-y-0.5 transition-transform border-2 border-transparent shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] flex items-center gap-2 disabled:opacity-50"
                  >
-                   {savingAddress && <Loader2 className="w-4 h-4 animate-spin" />}
+                   {savingProfile && <Loader2 className="w-4 h-4 animate-spin" />}
                    Save Profile
                  </button>
                </div>

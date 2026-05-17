@@ -301,8 +301,8 @@ export function AdminLibrary() {
      try {
         setSubmitting(true);
 
-        if (itemType === 'note' && !file) {
-           alert("Please provide a valid document.");
+        if (itemType === 'note' && !file && !linkUrl.trim()) {
+           alert("Please provide a valid document or a link.");
            setSubmitting(false);
            return;
         } else if (itemType === 'exam' && !quizData) {
@@ -393,6 +393,13 @@ export function AdminLibrary() {
               setSubmitting(false);
            }
            reader.readAsDataURL(file);
+        } else if (itemType === 'note' && linkUrl.trim()) {
+           payload.contentUrl = linkUrl.trim();
+           await addDoc(collection(db, 'library'), payload);
+           setIsUploadModalOpen(false);
+           resetForm();
+           fetchLibrary();
+           setSubmitting(false);
         }
 
      } catch (err: any) {
@@ -945,7 +952,17 @@ export function AdminLibrary() {
                         <div>
                            <label className="block text-xs font-bold uppercase mb-1">Upload PDF File</label>
                            <p className="text-xs text-zinc-500 mb-2">Note: Up to 5GB free spacing available. Secure viewing will protect this from external downloads.</p>
-                           <input type="file" accept="application/pdf" onChange={handleFileExtraction} required className="text-sm w-full file:mr-4 file:py-2 file:px-4 file:border-2 file:border-zinc-900 dark:file:border-zinc-100 file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-900 dark:file:text-white file:font-bold file:uppercase file:text-xs" />
+                           <input type="file" accept="application/pdf" onChange={handleFileExtraction} className="text-sm w-full file:mr-4 file:py-2 file:px-4 file:border-2 file:border-zinc-900 dark:file:border-zinc-100 file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-900 dark:file:text-white file:font-bold file:uppercase file:text-xs" />
+                        </div>
+                        <div className="flex items-center gap-4">
+                           <div className="h-px bg-zinc-300 dark:bg-zinc-700 flex-1"></div>
+                           <span className="text-xs font-bold uppercase text-zinc-400">OR</span>
+                           <div className="h-px bg-zinc-300 dark:bg-zinc-700 flex-1"></div>
+                        </div>
+                        <div>
+                           <label className="block text-xs font-bold uppercase mb-1">Direct PDF Link</label>
+                           <p className="text-xs text-zinc-500 mb-2">Use Google Drive or AWS S3 direct links to save database consumption. The link will be opened directly.</p>
+                           <input type="url" value={linkUrl} onChange={e => setLinkUrl(e.target.value)} className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none" placeholder="https://..." />
                         </div>
                         <div>
                            <label className="block text-xs font-bold uppercase mb-1">PDF Password (Optional)</label>
