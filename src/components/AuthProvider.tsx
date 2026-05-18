@@ -222,14 +222,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const provider = new GoogleAuthProvider();
     setQuotaError(null);
     try {
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone || document.referrer.includes('android-app://');
-      
-      if (isMobile || isStandalone) {
-         await signInWithRedirect(auth, provider);
-      } else {
-         await signInWithPopup(auth, provider);
-      }
+      await signInWithPopup(auth, provider);
     } catch (error: any) {
       console.error("Sign in failed", error);
       if (error.code === 'auth/popup-blocked' || error.code === 'auth/network-request-failed' || error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
