@@ -670,9 +670,20 @@ export function AdminLibrary() {
     }
   };
 
+  const handleBackNavigation = () => {
+     if (currentFolderId) {
+        const folder = items.find(i => i.id === currentFolderId);
+        setCurrentFolderId(folder?.parentId || null);
+     }
+  };
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
-      <PageHeader title="Central Library" backTo="/admin" />
+      <PageHeader 
+         title="Central Library" 
+         backTo="/admin" 
+         onBack={currentFolderId ? handleBackNavigation : undefined} 
+      />
       
       {!activeSession && activeSessionsList.length > 0 && (
         <div className="mb-6 p-4 bg-yellow-100 border-2 border-yellow-500 text-yellow-900 font-bold text-sm shadow-[4px_4px_0px_0px_rgba(234,179,8,1)] flex items-center justify-between">

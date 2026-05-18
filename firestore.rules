@@ -23,7 +23,9 @@ service cloud.firestore {
              data.role is string && (data.role == 'student' || data.role == 'admin') &&
              data.status is string &&
              (!('monthlyFee' in data) || data.monthlyFee == null || data.monthlyFee is number || data.monthlyFee is string) &&
-             (!('pendingMonths' in data) || data.pendingMonths == null || data.pendingMonths is number || data.pendingMonths is string);
+             (!('pendingMonths' in data) || data.pendingMonths == null || data.pendingMonths is number || data.pendingMonths is string) &&
+             (!('showPaymentNudge' in data) || data.showPaymentNudge is bool) &&
+             (!('exemptReason' in data) || data.exemptReason is string || data.exemptReason == null);
     }
 
     match /users/{userId} {

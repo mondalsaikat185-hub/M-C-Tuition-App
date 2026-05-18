@@ -9,13 +9,13 @@ import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
 import { getAllAttendanceForBatch } from '../lib/exam-session-utils';
 
-export function PageHeader({ title, backTo, description }: { title: string, backTo: string, description?: string }) {
+export function PageHeader({ title, backTo, description, onBack }: { title: string, backTo?: string, description?: string, onBack?: () => void }) {
   const navigate = useNavigate();
   return (
     <div className="flex flex-col mb-6">
       <div className="flex items-center gap-4">
         <button 
-          onClick={() => navigate(backTo)}
+          onClick={onBack ? onBack : () => backTo && navigate(backTo)}
           className="p-2 border-2 border-zinc-900 dark:border-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0"
         >
           <ArrowLeft className="w-5 h-5" />
@@ -40,19 +40,21 @@ export function AdminStudents() {
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentEmail, setNewStudentEmail] = useState('');
   const [newStudentBatch, setNewStudentBatch] = useState('');
+  const [newStudentPhone, setNewStudentPhone] = useState('');
   const [addingNewStudent, setAddingNewStudent] = useState(false);
   const [studentTab, setStudentTab] = useState<string>('pending');
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<AppUser | null>(null);
 
   const handleCreateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStudentName || !newStudentEmail || !newStudentBatch) return;
+    if (!newStudentName || !newStudentEmail || !newStudentBatch || !newStudentPhone) return;
     try {
       const mockUid = "student_" + Date.now() + Math.floor(Math.random()*1000);
       await setDoc(doc(db, 'users', mockUid), {
         uid: mockUid,
         email: newStudentEmail.toLowerCase(),
         fullName: newStudentName,
+        phone: newStudentPhone,
         role: 'student',
         status: 'active',
         batchId: newStudentBatch,
@@ -65,6 +67,7 @@ export function AdminStudents() {
       setNewStudentName('');
       setNewStudentEmail('');
       setNewStudentBatch('');
+      setNewStudentPhone('');
       setAddingNewStudent(false);
       window.location.reload();
     } catch (err) {
@@ -261,6 +264,17 @@ export function AdminStudents() {
                />
              </div>
              <div className="flex-1 w-full">
+               <label className="block text-xs font-bold uppercase mb-1">Phone</label>
+               <input 
+                 value={newStudentPhone} 
+                 onChange={e => setNewStudentPhone(e.target.value)}
+                 className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-white dark:bg-zinc-900 text-sm focus:outline-none" 
+                 placeholder="e.g. 9876543210"
+                 required
+                 type="tel"
+               />
+             </div>
+             <div className="flex-1 w-full">
                <label className="block text-xs font-bold uppercase mb-1">Assign Batch</label>
                <select 
                  value={newStudentBatch} 
@@ -404,10 +418,14 @@ export function AdminStudents() {
           ? pendingStudents
           : studentTab === 'all'
             ? students.filter(s => s.status === 'active')
-            : students.filter(s => s.status === 'active' && s.batchId === studentTab);
+            : studentTab === 'at_risk'
+              ? students.filter(s => s.status === 'active' && s.batchId && getAbsenceDays(studentLastActive[s.uid]) >= 3 && getAbsenceDays(studentLastActive[s.uid]) !== Infinity)
+              : students.filter(s => s.status === 'active' && s.batchId === studentTab);
+
+        const atRiskCount = students.filter(s => s.status === 'active' && s.batchId && getAbsenceDays(studentLastActive[s.uid]) >= 3 && getAbsenceDays(studentLastActive[s.uid]) !== Infinity).length;
 
         return (
-          <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] overflow-x-auto w-full">
+          <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] overflow-x-auto w-full mt-8">
             <div className="mb-6 flex overflow-x-auto border-b-4 border-black scrollbar-hide">
               <button
                 onClick={() => setStudentTab('pending')}
@@ -428,6 +446,15 @@ export function AdminStudents() {
                   {batch.name}
                 </button>
               ))}
+              <button
+                onClick={() => setStudentTab('at_risk')}
+                className={`px-4 py-3 font-bold text-sm uppercase whitespace-nowrap border-r-4 border-black transition-colors ${
+                  studentTab === 'at_risk' ? 'bg-red-500 text-white' : 'bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400'
+                }`}
+                title="Has not taken any exams in the last 3 days"
+              >
+                No Exams (3+ Days) ⚠️ ({atRiskCount})
+              </button>
               <button
                 onClick={() => setStudentTab('all')}
                 className={`px-4 py-3 font-bold text-sm uppercase whitespace-nowrap border-r-4 border-black transition-colors ${
@@ -1234,6 +1261,7 @@ export interface Payment {
 }
 
 export function AdminPayments() {
+  const { user } = useAuth();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
@@ -1279,7 +1307,8 @@ export function AdminPayments() {
       uSnap.forEach(d => {
          const data = d.data();
          if (data.role !== 'admin') {
-            uData.push({ id: d.id, ...data });
+            const mFee = (data.monthlyFee === undefined || data.monthlyFee === null) ? 500 : data.monthlyFee;
+            uData.push({ id: d.id, ...data, monthlyFee: mFee });
          }
       });
       setStudents(uData);
@@ -1317,7 +1346,24 @@ export function AdminPayments() {
       if (remarks) payload.remarks = remarks;
       await updateDoc(doc(db, 'payments', id), payload);
       setPayments(payments.map(p => p.id === id ? { ...p, status, remarks } : p));
+      
       if (status === 'rejected') {
+         const paymentToUpdate = payments.find(p => p.id === id);
+         if (paymentToUpdate) {
+            const studentMatch = students.find(s => s.id === paymentToUpdate.studentId);
+            await addDoc(collection(db, 'notifications'), {
+               senderId: user?.uid || 'admin',
+               senderRole: 'admin',
+               type: 'direct',
+               targetId: paymentToUpdate.studentId,
+               batchName: studentMatch ? studentMatch.fullName : 'Student',
+               title: 'Payment Rejected',
+               message: `Your payment request for ${paymentToUpdate.month} has been rejected. Reason: ${remarks}`,
+               createdAt: serverTimestamp(),
+               readers: []
+            });
+         }
+         
          setRejectingPaymentId(null);
          setRejectReason('');
       }
@@ -1402,41 +1448,54 @@ export function AdminPayments() {
          </div>
 
          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)]">
-               <h3 className="font-black uppercase mb-4 border-b-2 border-zinc-200 dark:border-zinc-800 pb-2">Student Payment Config</h3>
-               <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase mb-1">Monthly Salary / Fee (₹)</label>
-                    <input type="number" 
-                       value={student.monthlyFee || 0} 
-                       onChange={(e) => updateStudentPaymentDetails(student.id, { monthlyFee: Number(e.target.value) })}
-                       className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent font-mono" />
-                    <p className="text-[10px] text-zinc-500 mt-1">Set to 0 if not eligible to pay monthly fees.</p>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase mb-1">Exemption Reason</label>
-                    <input type="text" 
-                       value={student.exemptReason || ''} 
-                       onChange={(e) => updateStudentPaymentDetails(student.id, { exemptReason: e.target.value })}
-                       placeholder="e.g. Scholarship, relative, etc."
-                       className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase mb-1">Pending Months</label>
-                    <input type="number" 
-                       value={student.pendingMonths || 0} 
-                       onChange={(e) => updateStudentPaymentDetails(student.id, { pendingMonths: Number(e.target.value) })}
-                       className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent font-mono" />
-                  </div>
-                  <label className="flex items-center gap-2 mt-4 cursor-pointer">
-                     <input type="checkbox" 
-                        checked={!!student.showPaymentNudge}
-                        onChange={(e) => updateStudentPaymentDetails(student.id, { showPaymentNudge: e.target.checked })}
-                        className="w-4 h-4 accent-zinc-900 dark:accent-zinc-100" />
-                     <span className="text-sm font-bold uppercase text-red-600 dark:text-red-400">Activate App Nudge (Show Popup)</span>
-                  </label>
-               </div>
-            </div>
+             <form onSubmit={(e) => {
+                e.preventDefault();
+                const formData = new FormData(e.currentTarget);
+                updateStudentPaymentDetails(student.id, {
+                   monthlyFee: Number(formData.get('monthlyFee')),
+                   exemptReason: formData.get('exemptReason'),
+                   pendingMonths: Number(formData.get('pendingMonths')),
+                   showPaymentNudge: formData.get('showPaymentNudge') === 'on'
+                });
+                alert("Config saved successfully!");
+             }} className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)]">
+                <h3 className="font-black uppercase mb-4 border-b-2 border-zinc-200 dark:border-zinc-800 pb-2">Student Payment Config</h3>
+                <div className="space-y-4">
+                   <div>
+                     <label className="block text-xs font-bold uppercase mb-1">Monthly Salary / Fee (₹)</label>
+                     <input type="number" 
+                        name="monthlyFee"
+                        defaultValue={student.monthlyFee} 
+                        className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent font-mono" />
+                     <p className="text-[10px] text-zinc-500 mt-1">Set to 0 if not eligible to pay monthly fees.</p>
+                   </div>
+                   <div>
+                     <label className="block text-xs font-bold uppercase mb-1">Exemption Reason</label>
+                     <input type="text" 
+                        name="exemptReason"
+                        defaultValue={student.exemptReason || ''} 
+                        placeholder="e.g. Scholarship, relative, etc."
+                        className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent text-sm" />
+                   </div>
+                   <div>
+                     <label className="block text-xs font-bold uppercase mb-1">Pending Months</label>
+                     <input type="number" 
+                        name="pendingMonths"
+                        defaultValue={student.pendingMonths || 0} 
+                        className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent font-mono" />
+                   </div>
+                   <label className="flex items-center gap-2 mt-4 cursor-pointer">
+                      <input type="checkbox" 
+                         name="showPaymentNudge"
+                         defaultChecked={!!student.showPaymentNudge}
+                         className="w-4 h-4 accent-zinc-900 dark:accent-zinc-100" />
+                      <span className="text-sm font-bold uppercase text-red-600 dark:text-red-400">Activate App Nudge (Show Popup)</span>
+                   </label>
+                   <button type="submit" className="w-full mt-4 bg-emerald-500 text-black border-2 border-zinc-900 font-bold uppercase text-xs py-3 hover:-translate-y-0.5 shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] transition-transform">
+                      Save Config
+                   </button>
+                </div>
+             </form>
 
             <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] h-[32rem] flex flex-col">
                <div className="flex justify-between items-center mb-4 border-b-2 border-zinc-200 dark:border-zinc-800 pb-2">
@@ -1532,7 +1591,7 @@ export function AdminPayments() {
                       {s.monthlyFee > 0 ? (
                          <span className="text-xs font-mono text-zinc-500">Fee: ₹{s.monthlyFee}</span>
                       ) : (
-                         <span className="text-xs font-mono text-zinc-500 flex flex-col gap-1 w-full"><div className="opacity-60">Fee: None</div> <div className="text-[10px] bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 p-1 font-bold">⚠️ Profile Incomplete</div></span>
+                         <span className="text-xs font-mono text-zinc-500 flex flex-col gap-1 w-full"><div className="opacity-60">Fee: None (Free)</div></span>
                       )}
                       {pendingCount > 0 && <span className="text-[10px] bg-yellow-100 text-yellow-800 font-bold uppercase px-2 py-0.5 mt-1">{pendingCount} Pending Req</span>}
                     </button>

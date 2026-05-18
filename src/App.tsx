@@ -135,26 +135,24 @@ function TopNav() {
   useEffect(() => {
      if (!user) return;
 
-     const fetchUnread = async () => {
-        try {
-           const q = query(collection(db, 'notifications'), limit(100));
-           const snap = await getDocs(q);
-           let notifs = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
-           if (user.role === 'student') {
-              notifs = notifs.filter((n: any) => 
-                 n.senderId === user.uid ||
-                 n.type === 'admin_to_all' ||
-                 (n.type === 'admin_to_batch' && n.batchId === (user as any).batchId)
-              );
-           }
-           const unread = notifs.filter((n: any) => n.senderId !== user.uid && !(n.readers || []).includes(user.uid)).length;
-           setUnreadCount(unread);
-        } catch (err) {
-           console.error("Notifications fetch error", err);
-        }
-     };
+     const q = query(collection(db, 'notifications'), limit(100));
+     const unsub = onSnapshot(q, (snap) => {
+         let notifs = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
+         if (user.role === 'student') {
+            notifs = notifs.filter((n: any) => 
+               n.senderId === user.uid ||
+               n.targetId === user.uid ||
+               n.type === 'admin_to_all' ||
+               (n.type === 'admin_to_batch' && n.batchId === (user as any).batchId)
+            );
+         }
+         const unread = notifs.filter((n: any) => n.senderId !== user.uid && !(n.readers || []).includes(user.uid)).length;
+         setUnreadCount(unread);
+     }, (err) => {
+         console.error("Notifications fetch error", err);
+     });
 
-     fetchUnread();
+     return () => unsub();
   }, [user?.uid, user?.role, (user as any)?.batchId]);
 
   const handleEditProfileOpen = () => {
@@ -214,7 +212,7 @@ function TopNav() {
              >
                <Bell className="w-4 h-4" />
                {unreadCount > 0 && (
-                 <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-bounce">
+                 <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-bounce">
                     {unreadCount > 9 ? '9+' : unreadCount}
                  </span>
                )}

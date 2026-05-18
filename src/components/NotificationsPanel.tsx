@@ -22,13 +22,11 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (!user) return;
     
-    // Listen to batches for dropdown
-    if (user.role === 'admin') {
-       const uBatches = onSnapshot(collection(db, 'batches'), (snap) => {
-          setBatches(snap.docs.map(doc => ({id: doc.id, ...doc.data()})));
-       });
-       return () => uBatches();
-    }
+    // Listen to batches for dropdown and mapping
+    const uBatches = onSnapshot(collection(db, 'batches'), (snap) => {
+       setBatches(snap.docs.map(doc => ({id: doc.id, ...doc.data()})));
+    });
+    return () => uBatches();
   }, [user?.role]);
 
   useEffect(() => {
@@ -49,6 +47,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
           // Client side filter
           notifs = notifs.filter((n: any) => 
              n.senderId === user.uid ||
+             n.targetId === user.uid ||
              n.type === 'admin_to_all' ||
              (n.type === 'admin_to_batch' && n.batchId === (user as any).batchId)
           );
@@ -72,12 +71,18 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
         } else {
            const type = user.role === 'admin' ? (targetBatch === 'all' ? 'admin_to_all' : 'admin_to_batch') : 'student_to_admin';
            const selectedBatch = batches.find(b => b.id === targetBatch);
+           let studentBatchName = 'Unknown Batch';
+           if (user.role === 'student' && (user as any).batchId) {
+             const bMatch = batches.find(b => b.id === (user as any).batchId);
+             if (bMatch) studentBatchName = bMatch.name;
+           }
+
            await addDoc(collection(db, 'notifications'), {
               senderId: user.uid,
               senderRole: user.role,
               senderName: user.fullName || user.email,
               batchId: user.role === 'admin' ? targetBatch : ((user as any).batchId || 'none'),
-              batchName: user.role === 'admin' ? (selectedBatch ? selectedBatch.name : 'All Batches') : 'N/A', // just a helper
+              batchName: user.role === 'admin' ? (selectedBatch ? selectedBatch.name : 'All Batches') : studentBatchName,
               title,
               message,
               type,
@@ -202,7 +207,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
                                   : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900'
                              }`}
                           >
-                             {isUnread && <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-blue-600 pb-0.5"></span></span>}
+                             {isUnread && <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 pb-0.5"></span></span>}
 
                              <div className="flex justify-between items-start">
                                 <div>
@@ -210,7 +215,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
                                    <div className="flex items-center gap-1 mt-0.5">
                                       <span className="text-[10px] font-black uppercase px-1.5 py-0.5 bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
                                          {notif.senderRole === 'admin' ? 'Admin' : notif.senderName} 
-                                         {notif.batchName && notif.senderRole === 'admin' ? ` → ${notif.batchName}` : ''}
+                                         {notif.batchName && notif.batchName !== 'Unknown Batch' ? ` → ${notif.batchName}` : ''}
                                       </span>
                                       <span className="text-[10px] font-medium text-zinc-400">
                                          {notif.createdAt?.toDate().toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}

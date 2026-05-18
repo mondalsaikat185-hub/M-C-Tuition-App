@@ -251,9 +251,12 @@ export function StudentLibrary() {
         }
 
         try {
-           const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
-           const phonePassword = user?.phone || 'student-password';
-           byteArray = (await encryptPDF(byteArray, phonePassword.trim())) as any;
+           if (user?.phone && user.phone.trim()) {
+               const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
+               const phonePassword = user.phone.trim();
+               byteArray = (await encryptPDF(byteArray, phonePassword)) as any;
+               alert(`This PDF has been securely downloaded and password protected.\nPassword to open: ${phonePassword}`);
+           }
         } catch (pdfErr) {
            console.warn("Could not encrypt PDF with phone number:", pdfErr);
         }
@@ -266,7 +269,7 @@ export function StudentLibrary() {
      } catch (e: any) {
         console.error("Direct download with watermark failed.", e);
         const fallback = window.confirm(
-            "ডাউনলোড করতে সমস্যা হচ্ছে। (সম্ভবত নেটওয়ার্ক বা ব্রাউজারের কারণে)।\n\nআপনি কি অরিজিনাল পাসওয়ার্ড-ছাড়া লিংক ব্যবহার করে পিডিএফ-টি ব্রাউজারেই খুলতে বা ডাউনলোড করতে চান?"
+            "ডাউনলোড করতে সমস্যা হচ্ছে।\n\nআপনি কি সরাসরি গুগল ড্রাইভ লিংক ব্যবহার করে পিডিএফ-টি খুলতে চান?"
         );
         if (fallback && item.contentUrl) {
             window.open(item.contentUrl, '_blank');
@@ -322,9 +325,12 @@ export function StudentLibrary() {
         }
 
         try {
-           const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
-           const phonePassword = user?.phone || 'student-password';
-           byteArray = (await encryptPDF(byteArray, phonePassword.trim())) as any;
+           if (user?.phone && user.phone.trim()) {
+               const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
+               const phonePassword = user.phone.trim();
+               byteArray = (await encryptPDF(byteArray, phonePassword)) as any;
+               alert(`This PDF has been securely downloaded and password protected.\nPassword to open: ${phonePassword}`);
+           }
         } catch (pdfErr) {
            console.warn("Could not encrypt PDF with phone number:", pdfErr);
         }
@@ -481,10 +487,21 @@ export function StudentLibrary() {
      });
   };
 
+  const handleBackNavigation = () => {
+     if (currentFolderId) {
+        const folder = items.find(i => i.id === currentFolderId);
+        setCurrentFolderId(folder?.parentId || null);
+     }
+  };
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <PageHeader title="My Target Library" backTo="/" />
+          <PageHeader 
+             title="My Target Library" 
+             backTo="/" 
+             onBack={currentFolderId ? handleBackNavigation : undefined} 
+          />
           
           <div className="w-full sm:max-w-md relative">
              <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />

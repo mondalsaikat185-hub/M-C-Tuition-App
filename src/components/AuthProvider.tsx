@@ -134,7 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               batchId: preCreatedData?.batchId || null,
               phone: preCreatedData?.phone || null,
               fullName: preCreatedData?.fullName || null,
-              monthlyFee: preCreatedData?.monthlyFee || null,
+              monthlyFee: preCreatedData?.monthlyFee !== undefined && preCreatedData.monthlyFee !== null ? preCreatedData.monthlyFee : 500,
               pendingMonths: preCreatedData?.pendingMonths || 0,
               isProfileComplete: preCreatedData?.isProfileComplete || false,
               createdAt: serverTimestamp(),
