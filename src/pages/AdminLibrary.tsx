@@ -789,11 +789,16 @@ export function AdminLibrary() {
                {files.map(item => (
             <div key={item.id} className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                <div>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
                     <h4 className="font-black text-lg">{item.title}</h4>
                     <span className="text-[10px] bg-zinc-200 dark:bg-zinc-800 px-2 py-0.5 rounded-full font-bold uppercase">
                       {item.type === 'exam' ? item.examType : 'PDF Note'}
                     </span>
+                    {item.isChunked && (
+                       <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded border border-red-800 font-bold uppercase">
+                         WARNING: FILE EXHAUSTS QUOTA - PLEASE DELETE OR RE-UPLOAD AS GOOGLE DRIVE LINK
+                       </span>
+                    )}
                     {(item as any).isPasswordProtected && (
                        <span className="text-[10px] bg-red-100 text-red-800 px-2 py-0.5 rounded-full font-bold uppercase ml-2 border border-red-200">
                          Password Protected

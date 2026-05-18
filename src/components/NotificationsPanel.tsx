@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Bell, Plus, Edit, Trash2, CheckCircle, Loader2 } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import { db } from '../lib/firebase';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, arrayUnion, limit } from 'firebase/firestore';
 
 export function NotificationsPanel({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
@@ -29,7 +29,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
        });
        return () => uBatches();
     }
-  }, [user]);
+  }, [user?.role]);
 
   useEffect(() => {
     if (!user) return;
@@ -37,14 +37,10 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
     let q;
     if (user.role === 'admin') {
        // admin sees all
-       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
+       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(100));
     } else {
        // student sees admin_to_all, admin_to_batch (where batch matches), and their own sent msgs
-       // Since firestore "OR" queries or complex conditions can be tricky with indexes, 
-       // let's just query everything if we can't do complex. Or use multiple listeners.
-       // It's a small app, let's just listen to all and filter client side.
-       // Actually rules say: allow read: if isSignedIn();
-       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
+       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(100));
     }
 
     const unsub = onSnapshot(q, (snap) => {
@@ -61,7 +57,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
        setLoading(false);
     });
     return () => unsub();
-  }, [user]);
+  }, [user?.uid, user?.role, (user as any)?.batchId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
      e.preventDefault();

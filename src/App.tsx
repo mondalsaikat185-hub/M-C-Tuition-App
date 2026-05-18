@@ -9,7 +9,7 @@ import { useAuth, AuthContext } from './components/AuthProvider';
 import { useTheme } from './components/ThemeProvider';
 import { Moon, Sun, LogIn, Loader2, MoreVertical, LogOut, Edit, X, Bell } from 'lucide-react';
 import { db } from './lib/firebase';
-import { doc, updateDoc, collection, query, onSnapshot, where, getDocs, limit, orderBy, serverTimestamp, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, collection, query, onSnapshot, where, getDocs, limit, orderBy, serverTimestamp, getDoc, deleteDoc } from 'firebase/firestore';
 import { AdminStudents, AdminPayments, StudentPayments, AdminBatches, PageHeader } from './pages/Pages';
 import { AdminLibrary } from './pages/AdminLibrary';
 import { AdminResults } from './pages/AdminResults';
@@ -53,9 +53,24 @@ function ProtectedRoute({ children, adminOnly = false }: { children: React.React
   return <>{children}</>;
 }
 
+import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+
 function Login() {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, fbUser, quotaError, signInWithGoogle } = useAuth();
   
+  const [isInIframe, setIsInIframe] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (window.self !== window.top) {
+        setIsInIframe(true);
+      }
+    } catch (e) {
+      // If cross-origin error, it's definitely in an iframe
+      setIsInIframe(true);
+    }
+  }, []);
+
   if (user) {
     if (user.role === 'admin') return <Navigate to="/admin" />;
     return <Navigate to="/student" />;
@@ -65,14 +80,39 @@ function Login() {
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm p-8 border-2 border-zinc-900 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:border-zinc-100 dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] bg-white dark:bg-zinc-900 rounded-xl flex flex-col items-center">
         <h1 className="text-2xl font-black mb-2 uppercase italic text-center">Tuition Portal</h1>
-        <p className="text-zinc-500 mb-8 text-center text-sm font-medium">Please login to access your materials.</p>
-        <button 
-          onClick={signInWithGoogle}
-          className="flex w-full items-center justify-center gap-2 bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg border-2 border-zinc-900 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] transition-all uppercase text-sm"
-        >
-          <LogIn className="w-4 h-4" />
-          Sign In With Google
-        </button>
+        <p className="text-zinc-500 mb-6 text-center text-sm font-medium">অ্যাক্সেস পেতে আপনার গুগল অ্যাকাউন্ট দিয়ে লগইন করুন।</p>
+        
+        {quotaError && (
+          <div className="mb-6 p-4 border bg-red-100 text-red-800 text-sm font-bold w-full text-center">
+             {quotaError}
+          </div>
+        )}
+        
+        {isInIframe ? (
+          <div className="w-full flex justify-center mt-2 flex-col gap-4 bg-yellow-100 p-4 border border-yellow-500 rounded text-center">
+            <p className="text-sm font-bold text-yellow-900">
+               গুগল লগইন সিকিউরিটির জন্য এই উইন্ডোতে ব্লক করা হতে পারে।
+               <br/><br/>
+               দয়া করে নিচে ক্লিক করে নতুন ট্যাবে খুলুন:
+            </p>
+            <a 
+              href={window.location.href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex w-full items-center justify-center bg-blue-600 text-white font-bold py-3 px-4 rounded-lg border-2 border-zinc-900 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] hover:translate-y-0.5 transition-all text-sm uppercase"
+            >
+              নতুন ট্যাবে খুলুন (Open in New Tab)
+            </a>
+          </div>
+        ) : (
+          <button 
+            onClick={signInWithGoogle}
+            className="flex w-full items-center justify-center gap-2 bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg border-2 border-zinc-900 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] hover:translate-y-0.5 hover:shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] transition-all uppercase text-sm"
+          >
+            <LogIn className="w-4 h-4" />
+            গুগল দিয়ে লগইন করুন
+          </button>
+        )}
       </div>
     </div>
   );
@@ -95,21 +135,27 @@ function TopNav() {
   useEffect(() => {
      if (!user) return;
 
-     const q = query(collection(db, 'notifications'));
-     const unsub = onSnapshot(q, (snap) => {
-        let notifs = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
-        if (user.role === 'student') {
-           notifs = notifs.filter((n: any) => 
-              n.senderId === user.uid ||
-              n.type === 'admin_to_all' ||
-              (n.type === 'admin_to_batch' && n.batchId === (user as any).batchId)
-           );
+     const fetchUnread = async () => {
+        try {
+           const q = query(collection(db, 'notifications'), limit(100));
+           const snap = await getDocs(q);
+           let notifs = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
+           if (user.role === 'student') {
+              notifs = notifs.filter((n: any) => 
+                 n.senderId === user.uid ||
+                 n.type === 'admin_to_all' ||
+                 (n.type === 'admin_to_batch' && n.batchId === (user as any).batchId)
+              );
+           }
+           const unread = notifs.filter((n: any) => n.senderId !== user.uid && !(n.readers || []).includes(user.uid)).length;
+           setUnreadCount(unread);
+        } catch (err) {
+           console.error("Notifications fetch error", err);
         }
-        const unread = notifs.filter((n: any) => n.senderId !== user.uid && !(n.readers || []).includes(user.uid)).length;
-        setUnreadCount(unread);
-     });
-     return () => unsub();
-  }, [user]);
+     };
+
+     fetchUnread();
+  }, [user?.uid, user?.role, (user as any)?.batchId]);
 
   const handleEditProfileOpen = () => {
     setEditName(user?.fullName || user?.displayName || '');
@@ -235,7 +281,7 @@ function TopNav() {
              <button 
                 onClick={() => setShowEditProfile(false)}
                 className="absolute top-4 right-4 bg-red-100 text-red-600 p-2 border-2 border-red-600 hover:bg-red-200 transition-colors"
-                disabled={savingAddress}
+                disabled={savingProfile}
              >
                 <X className="w-5 h-5" />
              </button>
@@ -495,31 +541,31 @@ function StudentDashboard() {
         if (user.batchId) {
           const assignQ = query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId));
           const assignSnaps = await getDocs(assignQ);
-          const assignedIds = new Set<string>();
-          assignSnaps.forEach(d => assignedIds.add(d.data().libraryItemId));
+          const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data() as any}));
+          
+          assigns.sort((a,b) => (b.assignedAt?.toMillis() || 0) - (a.assignedAt?.toMillis() || 0));
+          
+          let sortedAssignedIds = Array.from(new Set(assigns.map(a => a.libraryItemId)));
+          // Take top 20 assigned items to save reads. 
+          const targetIds = sortedAssignedIds.slice(0, 20);
 
-          if (assignedIds.size > 0) {
-             const libQ = query(collection(db, 'library'));
-             const libSnaps = await getDocs(libQ);
+          if (targetIds.length > 0) {
              const allItems: any[] = [];
-             libSnaps.forEach(d => allItems.push({ id: d.id, ...d.data() }));
+             for (let i = 0; i < targetIds.length; i += 10) {
+                 const chunk = targetIds.slice(i, i + 10);
+                 const libQ = query(collection(db, 'library'), where('__name__', 'in', chunk));
+                 const libSnaps = await getDocs(libQ);
+                 libSnaps.forEach(d => allItems.push({ id: d.id, ...d.data() }));
+             }
 
-             const accessibleIds = new Set<string>();
-             const addWithDescendants = (parentId: string) => {
-                accessibleIds.add(parentId);
-                const children = allItems.filter(i => i.parentId === parentId);
-                for (const c of children) addWithDescendants(c.id);
-             };
-             for (const id of assignedIds) addWithDescendants(id);
-
-             const accessibleFiles = allItems.filter(i => accessibleIds.has(i.id) && !i.isFolder);
+             const accessibleFiles = allItems.filter(i => !i.isFolder);
              accessibleFiles.sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
              
              const eData = accessibleFiles.filter(i => i.type === 'exam');
              const nData = accessibleFiles.filter(i => i.type === 'note' || i.type === 'pdf');
              
              setExams(eData.slice(0, 3));
-             setNotes(nData.slice(0, 5)); // show latest 5 notes
+             setNotes(nData.slice(0, 5));
           }
         }
 

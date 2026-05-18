@@ -17,33 +17,18 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email', 'role', 'status', 'createdAt', 'updatedAt']) &&
+      return data.keys().hasAll(['uid', 'email', 'role', 'status']) &&
              (data.uid == request.auth.uid || isAdmin()) &&
-             data.email is string && data.email.size() <= 200 &&
+             data.email is string &&
              data.role is string && (data.role == 'student' || data.role == 'admin') &&
-             data.status is string && (data.status == 'pending' || data.status == 'active' || data.status == 'inactive' || data.status == 'rejected') &&
-             (!('displayName' in data) || data.displayName == null || data.displayName is string) &&
-             (!('photoURL' in data) || data.photoURL == null || data.photoURL is string) &&
-             (!('fullName' in data) || data.fullName == null || data.fullName is string) &&
-             (!('address' in data) || data.address == null || data.address is string) &&
-             (!('dob' in data) || data.dob == null || data.dob is string) &&
-             (!('joinDate' in data) || data.joinDate == null || data.joinDate is string) &&
-             (!('phone' in data) || data.phone == null || data.phone is string) &&
-             (!('batchId' in data) || data.batchId == null || data.batchId is string) &&
-             (!('profilePhotoUrl' in data) || data.profilePhotoUrl == null || data.profilePhotoUrl is string) &&
-             (!('isProfileComplete' in data) || data.isProfileComplete == null || data.isProfileComplete is bool) &&
-             (!('monthlyFee' in data) || data.monthlyFee == null || data.monthlyFee is number) &&
-             (!('exemptReason' in data) || data.exemptReason == null || data.exemptReason is string) &&
-             (!('pendingMonths' in data) || data.pendingMonths == null || data.pendingMonths is number) &&
-             (!('showPaymentNudge' in data) || data.showPaymentNudge == null || data.showPaymentNudge is bool) &&
-             (!('activeDevices' in data) || data.activeDevices == null || data.activeDevices is list) &&
-             data.createdAt is timestamp &&
-             data.updatedAt is timestamp;
+             data.status is string &&
+             (!('monthlyFee' in data) || data.monthlyFee == null || data.monthlyFee is number || data.monthlyFee is string) &&
+             (!('pendingMonths' in data) || data.pendingMonths == null || data.pendingMonths is number || data.pendingMonths is string);
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn();
       allow create: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin()) &&
                     isValidUser(incoming()) && incoming().createdAt == request.time;
       allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming()) &&

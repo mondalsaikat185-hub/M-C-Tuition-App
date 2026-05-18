@@ -5,9 +5,10 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  getRedirectResult,
   signOut as firebaseSignOut
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp, updateDoc, query, collection, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 
@@ -23,7 +24,6 @@ export interface AppUser {
   status: UserStatus;
   createdAt: any;
   updatedAt: any;
-  activeDevices?: string[];
   // Additional fields for student
   fullName?: string;
   address?: string;
@@ -39,6 +39,7 @@ interface AuthContextType {
   fbUser: FirebaseUser | null;
   user: AppUser | null;
   loading: boolean;
+  quotaError: string | null;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -47,6 +48,7 @@ export const AuthContext = createContext<AuthContextType>({
   fbUser: null,
   user: null,
   loading: true,
+  quotaError: null,
   signInWithGoogle: async () => {},
   signOut: async () => {},
 });
@@ -57,13 +59,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [quotaError, setQuotaError] = useState<string | null>(null);
 
   useEffect(() => {
     let docUnsubscribe: (() => void) | null = null;
 
-    // Persist a unique device ID in localStorage to track this browser instance
-    const currentDeviceId = localStorage.getItem('mc_local_device_id') || Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
-    localStorage.setItem('mc_local_device_id', currentDeviceId);
+    // Check for redirect results first
+    getRedirectResult(auth).then((result) => {
+       if (result) {
+          console.log("Logged in via redirect", result.user.email);
+       }
+    }).catch((error) => {
+       // Silently ignore - not a real error if no redirect happened
+       console.warn("getRedirectResult (non-critical):", error.code);
+    });
 
     const unsubscribeFb = onAuthStateChanged(auth, async (firebaseUser) => {
       setFbUser(firebaseUser);
@@ -87,37 +96,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
              if (tempUserDoc.exists() && tempUserDoc.data().role === 'admin') {
                 isAdmin = true;
                 // Auto-add to admins collection for future
-                await setDoc(doc(db, 'admins', firebaseUser.uid), { email: firebaseUser.email, role: 'admin' });
+                try {
+                   await setDoc(doc(db, 'admins', firebaseUser.uid), { email: firebaseUser.email, role: 'admin' });
+                } catch (e) {
+                   console.log("Could not auto-add to admins", e);
+                }
              }
           }
 
           // Initialize if it doesn't exist
           const docSnap = await getDoc(userRef);
-          
-          let activeDevices = docSnap.exists() ? (docSnap.data().activeDevices || []) : [];
-          let needsDeviceUpdate = false;
-          
-          if (!activeDevices.includes(currentDeviceId)) {
-             activeDevices.push(currentDeviceId);
-             if (activeDevices.length > 5) {
-                 activeDevices = activeDevices.slice(activeDevices.length - 5); // Keep the last 5 devices
-             }
-             needsDeviceUpdate = true;
-          }
 
           if (!docSnap.exists()) {
+            let preCreatedData = null;
+            let oldDocId = null;
+            
+            try {
+                // Look for admin pre-created user by email
+                const q = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
+                const adminCreatedSnaps = await getDocs(q);
+                if (!adminCreatedSnaps.empty) {
+                   preCreatedData = adminCreatedSnaps.docs[0].data();
+                   oldDocId = adminCreatedSnaps.docs[0].id;
+                }
+            } catch (e) {
+                console.warn("Could not query pre-existing users", e);
+            }
+
             const newUser = {
               uid: firebaseUser.uid,
               email: firebaseUser.email || '',
               displayName: firebaseUser.displayName || null,
               photoURL: firebaseUser.photoURL || null,
-              role: isAdmin ? 'admin' : 'student',
-              status: isAdmin ? 'active' : 'pending',
-              activeDevices,
+              role: isAdmin ? 'admin' : (preCreatedData?.role || 'student'),
+              status: isAdmin ? 'active' : (preCreatedData?.status || 'pending'),
+              batchId: preCreatedData?.batchId || null,
+              phone: preCreatedData?.phone || null,
+              fullName: preCreatedData?.fullName || null,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             };
             await setDoc(userRef, newUser);
+
+            if (oldDocId) {
+               try {
+                   await deleteDoc(doc(db, 'users', oldDocId));
+               } catch (e) {
+                   console.error("Failed to delete orphaned user doc", e);
+               }
+            }
           } else {
             // Already exists, but we should make sure admin has admin role & update devices
             const data = docSnap.data();
@@ -126,45 +153,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               updates.role = 'admin';
               updates.status = 'active';
             }
-            if (needsDeviceUpdate) {
-              updates.activeDevices = activeDevices;
-            }
             if (Object.keys(updates).length > 0) {
               updates.updatedAt = serverTimestamp();
-              await updateDoc(userRef, updates);
+              try {
+                 await updateDoc(userRef, updates);
+              } catch (e: any) {
+                 console.warn("Non-fatal error updating user device info", e);
+              }
             }
           }
         } catch (error: any) {
           if (error?.message?.includes('Quota') || error?.code === 'resource-exhausted') {
              console.error('AuthProvider setup error:', error);
-             alert('ডেটাবেস এর আজকের ফ্রি লিমিট শেষ (Quota Exceeded)।\n\nঅনুগ্রহ করে আগামীকাল দুপুর ১টা পর্যন্ত অপেক্ষা করুন, অথবা Firebase Console (Usage tab) চেক করুন।');
+             setQuotaError('ডেটাবেস এর আজকের ফ্রি লিমিট শেষ (Quota Exceeded)। দয়া করে আবার চেষ্টা করুন বা কালকের জন্য অপেক্ষা করুন।');
           } else if (error?.message?.includes('offline') || error?.code === 'unavailable' || error?.message?.includes('network')) {
-             console.log('Client offline, initial setup failed.');
+             console.log('Client offline, initial setup failed.', error);
+             setQuotaError('লগইন সফল হয়েছে, কিন্তু ডেটাবেসের সাথে কানেক্ট করা যাচ্ছে না (Network/Offline Error)। আপনার ব্রাউজারের ক্যাশ (Cache) ক্লিয়ার করে আবার চেষ্টা করুন। (' + error.message + ')');
           } else {
              console.error('AuthProvider setup error:', error);
+             setQuotaError('Setup Error: ' + error.message);
           }
+          setLoading(false);
+          return; // STOP EXECUTION HERE SO WE DON'T ENTER ONSNAPSHOT WITH FAULTY STATE
         }
 
         // Listen for real-time updates
         docUnsubscribe = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data() as AppUser;
-            
-            // Check max device limit (Auto-logout if bumped)
-            const allowedDevices = data.activeDevices || [];
-            if (allowedDevices.length > 0 && !allowedDevices.includes(currentDeviceId)) {
-               // Silently do nothing instead of auto-logout due to high false-positives
-               // firebaseSignOut(auth).then(() => { ... });
-            }
 
             setUser(data);
+          } else {
+             setUser(null); // Explicitly clear if missing
           }
           setLoading(false);
         }, (error: any) => {
           console.error('User snapshot error:', error);
           setLoading(false);
           if (error?.message?.includes('Quota') || error?.code === 'resource-exhausted') {
-             alert('ডেটাবেস এর আজকের ফ্রি লিমিট শেষ (Quota Exceeded)।\n\nঅনুগ্রহ করে আগামীকাল দুপুর ১টা পর্যন্ত অপেক্ষা করুন।');
+             setQuotaError('ডেটাবেস এর আজকের ফ্রি লিমিট শেষ (Quota Exceeded)।');
           } else if (error?.message?.includes('offline') || error?.code === 'unavailable') {
              // Silently ignore offline error in snapshot to avoid spam
              console.log("Client offline, snapshot failed.");
@@ -187,20 +214,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
+    setQuotaError(null);
     try {
-      await signInWithPopup(auth, provider);
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone || document.referrer.includes('android-app://');
+      
+      if (isMobile || isStandalone) {
+         await signInWithRedirect(auth, provider);
+      } else {
+         await signInWithPopup(auth, provider);
+      }
     } catch (error: any) {
       console.error("Sign in failed", error);
-      if (error.code === 'auth/popup-blocked' || error.code === 'auth/network-request-failed') {
+      if (error.code === 'auth/popup-blocked' || error.code === 'auth/network-request-failed' || error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
         try {
+           setQuotaError("লগইন পপআপ কাজ করছে না। Redirect Login শুরু হচ্ছে...");
            await signInWithRedirect(auth, provider);
-        } catch (redirectError) {
-           alert("Unable to sign in due to browser restrictions. Please open the app in a new tab by clicking ↗ or 'Share' in the top right.");
+        } catch (redirectError: any) {
+           console.error("Redirect also failed", redirectError);
+           setQuotaError("redirect failed: " + redirectError.message);
         }
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        // Safe to ignore, user just closed it
       } else {
-        alert("Sign in error: " + error.message);
+        setQuotaError("Sign in error: " + error.message + "\n\nদয়া করে আবার চেষ্টা করুন।");
       }
     }
   };
@@ -210,7 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ fbUser, user, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ fbUser, user, loading, quotaError, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );

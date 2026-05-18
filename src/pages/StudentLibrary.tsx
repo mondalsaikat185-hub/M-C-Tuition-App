@@ -62,23 +62,24 @@ export function StudentLibrary() {
     }
     setLoading(true);
 
-    const assignUnsub = onSnapshot(query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId)), (assignSnaps) => {
-       const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()}));
-       assigns.sort((a,b) => {
-           const tA = a.assignedAt?.toMillis() || 0;
-           const tB = b.assignedAt?.toMillis() || 0;
-           return tB - tA;
-       });
-       setAllAssigns(assigns);
-    }, (err) => {
-       console.error(err);
-       setLoading(false);
-    });
-
-    return () => {
-       assignUnsub();
+    const fetchAssignments = async () => {
+       try {
+           const assignSnaps = await getDocs(query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId)));
+           const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()} as any));
+           assigns.sort((a,b) => {
+               const tA = a.assignedAt?.toMillis() || 0;
+               const tB = b.assignedAt?.toMillis() || 0;
+               return tB - tA;
+           });
+           setAllAssigns(assigns);
+       } catch (err) {
+           console.error(err);
+           setLoading(false);
+       }
     };
-  }, [user]);
+    
+    fetchAssignments();
+  }, [user?.batchId]);
 
   useEffect(() => {
     const processVisibleItems = async () => {
@@ -119,6 +120,7 @@ export function StudentLibrary() {
                      const snaps = await getDocs(q);
                      snaps.forEach(snap => {
                         const data = { id: snap.id, ...snap.data() } as LibraryItem;
+                        if (data.isChunked) return;
                         currentCache.set(data.id, data);
                         if (data.parentId && !currentCache.has(data.parentId)) {
                             nextIds.add(data.parentId);
@@ -179,7 +181,9 @@ export function StudentLibrary() {
              const snaps = await getDocs(q);
              const newCache = new Map(libraryCache);
              snaps.forEach(snap => {
-                newCache.set(snap.id, { id: snap.id, ...snap.data() } as LibraryItem);
+                const data = snap.data();
+                if (data.isChunked) return;
+                newCache.set(snap.id, { id: snap.id, ...data } as LibraryItem);
              });
              setLibraryCache(newCache);
              setFetchedFolders(f => new Set(f).add(folderId));
@@ -199,11 +203,23 @@ export function StudentLibrary() {
         let targetUrl = item.contentUrl;
         let res = await fetch(targetUrl).catch(() => null);
         
-        // If Direct Fetch fails (likely CORS from Google Drive), try a CORS Proxy
+        // If Direct Fetch fails (likely CORS from Google Drive), try a sequence of CORS Proxies
         if (!res || !res.ok) {
-           const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(item.contentUrl)}`;
-           res = await fetch(proxyUrl);
-           if (!res.ok) throw new Error("CORS Proxy Fetch failed");
+           const proxies = [
+               `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+               `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+               `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+               `https://thingproxy.freeboard.io/fetch/${targetUrl}`
+           ];
+           for (const proxyUrl of proxies) {
+               try {
+                  res = await fetch(proxyUrl);
+                  if (res && res.ok) break;
+               } catch (err) {
+                  // Ignore and try next
+               }
+           }
+           if (!res || !res.ok) throw new Error("CORS Proxy Fetch failed for all proxies");
         }
         
         const arrayBuffer = await res.arrayBuffer();
@@ -249,7 +265,12 @@ export function StudentLibrary() {
         link.click();
      } catch (e: any) {
         console.error("Direct download with watermark failed.", e);
-        alert("ডাউনলোড করতে সমস্যা হচ্ছে। অনুগ্রহ করে আপনার ইন্টারনেট কানেকশন চেক করুন এবং আবার চেষ্টা করুন। সমস্যা চলতে থাকলে ডেস্কটপ ব্রাউজার ব্যবহার করুন।");
+        const fallback = window.confirm(
+            "ডাউনলোড করতে সমস্যা হচ্ছে। (সম্ভবত নেটওয়ার্ক বা ব্রাউজারের কারণে)।\n\nআপনি কি অরিজিনাল পাসওয়ার্ড-ছাড়া লিংক ব্যবহার করে পিডিএফ-টি ব্রাউজারেই খুলতে বা ডাউনলোড করতে চান?"
+        );
+        if (fallback && item.contentUrl) {
+            window.open(item.contentUrl, '_blank');
+        }
      } finally {
         setDownloadingId(null);
      }
@@ -317,67 +338,67 @@ export function StudentLibrary() {
         link.click();
      } catch (err) {
         console.error('Download failed:', err);
-        alert('Download failed. Request admin to re-upload.');
+        alert('Download failed. Please try again.');
      } finally {
         setDownloadingId(null);
      }
   };
 
   const handleItemClick = async (item: LibraryItem) => {
-     if (item.type !== 'exam') {
-        setPreviewItem(item);
-        return;
-     }
-
-     if (!user || !(user as any).batchId) {
-        alert("প্রথমে একটি batch-এ যোগ দিন");
-        return;
-     }
-
      try {
-       const q = query(
-          collection(db, 'examSessions'),
-          where('examId', '==', item.id)
-       );
-       const snap = await getDocs(q);
+         if (item.type !== 'exam') {
+            setPreviewItem(item);
+            return;
+         }
 
-       const batchSessionDocs = snap.docs.filter(doc => doc.data().batchId === (user as any).batchId);
-       const activeSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === true);
-       const endedSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === false);
+         if (!user || !(user as any).batchId) {
+            alert("প্রথমে একটি batch-এ যোগ দিন (Join a batch first)");
+            return;
+         }
 
-       if (batchSessionDocs.length === 0) {
-          // No sessions at all -> just a mock test or open assignment
-          setPreviewItem(item);
-          return;
-       }
+         const q = query(
+            collection(db, 'examSessions'),
+            where('examId', '==', item.id)
+         );
+         const snap = await getDocs(q);
 
-       if (activeSessionDocs.length === 0) {
-          if (endedSessionDocs.length > 0) {
-             // Session ended -> direct access without code
-             setPreviewItem(item);
-          } else {
-             alert('এই পরীক্ষা এখনো শুরু হয়নি। দয়া করে লাইভ সেশন শুরু হওয়া পর্যন্ত অপেক্ষা করুন।');
-          }
-          return;
-       }
+         const batchSessionDocs = snap.docs.filter(doc => doc.data().batchId === (user as any).batchId);
+         const activeSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === true);
+         const endedSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === false);
 
-       const activeSessionDoc = activeSessionDocs[0];
-       const activeSession = activeSessionDoc.data();
+         if (batchSessionDocs.length === 0) {
+            // No sessions at all -> just a mock test or open assignment
+            setPreviewItem(item);
+            return;
+         }
 
-       // Check if already a participant
-       const participants = activeSession.participants || [];
-       if (participants.includes(user.uid)) {
-          setPreviewItem(item);
-          return;
-       }
+         if (activeSessionDocs.length === 0) {
+            if (endedSessionDocs.length > 0) {
+               // Session ended -> direct access without code
+               setPreviewItem(item);
+            } else {
+               alert('এই পরীক্ষা এখনো শুরু হয়নি। দয়া করে লাইভ সেশন শুরু হওয়া পর্যন্ত অপেক্ষা করুন।');
+            }
+            return;
+         }
 
-       // Require code for new participant
-       setCodeInputItem(item);
-       setEnteredCode('');
-       setCodeError('');
-     } catch (err) {
-       console.error("Exam session fetch error:", err);
-       alert("Error fetching exam session.");
+         const activeSessionDoc = activeSessionDocs[0];
+         const activeSession = activeSessionDoc.data();
+
+         // Check if already a participant
+         const participants = activeSession.participants || [];
+         if (participants.includes(user.uid)) {
+            setPreviewItem(item);
+            return;
+         }
+
+         // Require code for new participant
+         setCodeInputItem(item);
+         setEnteredCode('');
+         setCodeError('');
+     } catch (err: any) {
+         console.error("handleItemClick error:", err);
+         alert("ফাইল খুলতে একটি সমস্যা হয়েছে (Error): " + err.message);
      }
   };
 

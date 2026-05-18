@@ -1647,7 +1647,7 @@ export function StudentPayments() {
      });
 
      return () => unsubscribe();
-  }, [user]);
+  }, [user?.uid]);
 
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
