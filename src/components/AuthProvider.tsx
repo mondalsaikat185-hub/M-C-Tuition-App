@@ -113,7 +113,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             
             try {
                 // Look for admin pre-created user by email
-                const q = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
+                const emailLower = (firebaseUser.email || '').toLowerCase();
+                const q = query(collection(db, 'users'), where('email', '==', emailLower));
                 const adminCreatedSnaps = await getDocs(q);
                 if (!adminCreatedSnaps.empty) {
                    preCreatedData = adminCreatedSnaps.docs[0].data();
@@ -125,7 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             const newUser = {
               uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
+              email: (firebaseUser.email || '').toLowerCase(),
               displayName: firebaseUser.displayName || null,
               photoURL: firebaseUser.photoURL || null,
               role: isAdmin ? 'admin' : (preCreatedData?.role || 'student'),
@@ -133,6 +134,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               batchId: preCreatedData?.batchId || null,
               phone: preCreatedData?.phone || null,
               fullName: preCreatedData?.fullName || null,
+              monthlyFee: preCreatedData?.monthlyFee || null,
+              pendingMonths: preCreatedData?.pendingMonths || 0,
+              isProfileComplete: preCreatedData?.isProfileComplete || false,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             };
@@ -195,6 +199,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } else if (error?.message?.includes('offline') || error?.code === 'unavailable') {
              // Silently ignore offline error in snapshot to avoid spam
              console.log("Client offline, snapshot failed.");
+          } else {
+             setQuotaError('ডেটা লোড করতে সমস্যা হয়েছে: ' + error.message);
           }
         });
 
