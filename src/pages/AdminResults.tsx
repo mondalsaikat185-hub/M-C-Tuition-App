@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, orderBy, where, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, where, deleteDoc, doc, writeBatch, onSnapshot } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { PageHeader } from './Pages';
 import { Loader2, Trash2, Search } from 'lucide-react';
@@ -21,115 +21,102 @@ export function AdminResults() {
   const [tab, setTab] = useState<'latest' | 'student' | 'exam'>('latest');
 
   useEffect(() => {
-    fetchResults();
-  }, [examId]);
+    let unsubscribe: () => void;
 
-  const fetchResults = async () => {
-    try {
-      setLoading(true);
-      
-      const bSnap = await getDocs(collection(db, 'batches'));
-      const bData: any[] = [];
-      bSnap.forEach(d => bData.push({ id: d.id, ...d.data() }));
-      setBatches(bData);
-
-      let q;
-      if (examId) {
-         q = query(collection(db, 'results'), where('examId', '==', examId));
-      } else {
-         q = query(collection(db, 'results'), orderBy('createdAt', 'desc'));
-      }
-      
-      const qSnap = await getDocs(q);
-      const data: any[] = [];
-      
-      const userIds = new Set<string>();
-      qSnap.forEach(d => {
-         const dData = d.data() as any;
-         data.push({ id: d.id, ...dData });
-         if (dData.studentId) userIds.add(dData.studentId);
-      });
-
-      // Fetch students
-      if (userIds.size > 0 || !examId) {
-         const uSnap = await getDocs(collection(db, 'users'));
-         const userDict: Record<string, any> = {};
-         uSnap.forEach(d => { 
-            userDict[d.id] = {
-               name: d.data().fullName || d.data().displayName || d.data().email || 'Unknown',
-               batchId: d.data().batchId
-            }; 
-         });
-         
-         data.forEach(r => {
-            r.studentName = userDict[r.studentId]?.name || r.studentName || 'Unknown Student';
-            r.studentBatchId = userDict[r.studentId]?.batchId || null;
-            r.formattedDate = r.createdAt?.toDate().toLocaleDateString(undefined, {
-               year: 'numeric',
-               month: 'short',
-               day: 'numeric'
-            }) || 'Unknown Date';
-         });
-      }
-
-      // Auto-cleanup logic: Keep only the latest date's results PER BATCH
-      let finalData = data;
-      if (!examId) {
-        const batchMaxTime = new Map<string, number>();
-        data.forEach(r => {
-           if (r.studentBatchId && r.createdAt) {
-              const t = r.createdAt.toDate().getTime();
-              if (!batchMaxTime.has(r.studentBatchId) || t > batchMaxTime.get(r.studentBatchId)!) {
-                 batchMaxTime.set(r.studentBatchId, t);
-              }
-           }
-        });
-
-        const idsToDelete: string[] = [];
-        finalData = [];
+    const fetchInitialData = async () => {
+      try {
+        setLoading(true);
         
-        data.forEach(r => {
-           if (r.studentBatchId && r.createdAt) {
-              const t = r.createdAt.toDate().getTime();
-              const maxT = batchMaxTime.get(r.studentBatchId)!;
-              const resDate = new Date(t).toLocaleDateString();
-              const maxDate = new Date(maxT).toLocaleDateString();
-              
-              if (resDate !== maxDate) {
-                 idsToDelete.push(r.id);
-                 return; // Exclude from finalData
-              }
-           }
-           finalData.push(r);
+        const bSnap = await getDocs(collection(db, 'batches'));
+        const bData: any[] = [];
+        bSnap.forEach(d => bData.push({ id: d.id, ...d.data() }));
+        setBatches(bData);
+        if (!examId && bData.length > 0 && !activeBatchId) {
+           setActiveBatchId(bData[0].id);
+        }
+
+        const uSnap = await getDocs(collection(db, 'users'));
+        const userDict: Record<string, any> = {};
+        uSnap.forEach(d => { 
+           userDict[d.id] = {
+              name: d.data().fullName || d.data().displayName || d.data().email || 'Unknown',
+              batchId: d.data().batchId
+           }; 
         });
 
-        // Delete older results asynchronously
-        if (idsToDelete.length > 0) {
-           setTimeout(async () => {
-              try {
-                 const chunks = [];
-                 for(let i=0; i<idsToDelete.length; i+=500) chunks.push(idsToDelete.slice(i, i+500));
-                 for (const chunk of chunks) {
-                    const batchFn = writeBatch(db);
-                    chunk.forEach(id => batchFn.delete(doc(db, 'results', id)));
-                    await batchFn.commit();
-                 }
-                 console.log(`Auto-cleaned ${idsToDelete.length} old results.`);
-              } catch(e) { console.error("Auto delete failed", e); }
-           }, 1000); // 1s delay to not block UI
+        let q;
+        if (examId) {
+           q = query(collection(db, 'results'), where('examId', '==', examId));
+        } else {
+           q = query(collection(db, 'results'), orderBy('createdAt', 'desc'));
         }
+        
+        unsubscribe = onSnapshot(q, async (qSnap) => {
+          const data: any[] = [];
+          
+          qSnap.forEach(d => {
+             const dData = d.data() as any;
+             data.push({ id: d.id, ...dData });
+          });
+
+          // Match students
+          data.forEach(r => {
+             r.studentName = userDict[r.studentId]?.name || r.studentName || 'Unknown Student';
+             r.studentBatchId = userDict[r.studentId]?.batchId || null;
+             r.formattedDate = r.createdAt?.toDate().toLocaleDateString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+             }) || 'Unknown Date';
+          });
+
+          const now = Date.now();
+          const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+          const idsToDelete: string[] = [];
+          const keptData: any[] = [];
+          
+          data.forEach(r => {
+             if (r.createdAt) {
+                 const age = now - r.createdAt.toMillis();
+                 if (age > TWENTY_FOUR_HOURS) {
+                     idsToDelete.push(r.id);
+                     return;
+                 }
+             }
+             keptData.push(r);
+          });
+
+          if (idsToDelete.length > 0) {
+             setTimeout(async () => {
+                try {
+                   const chunks = [];
+                   for(let i=0; i<idsToDelete.length; i+=500) chunks.push(idsToDelete.slice(i, i+500));
+                   for (const chunk of chunks) {
+                      const batchFn = writeBatch(db);
+                      chunk.forEach(id => batchFn.delete(doc(db, 'results', id)));
+                      await batchFn.commit();
+                   }
+                   console.log(`Auto-cleaned ${idsToDelete.length} results older than 24 hours.`);
+                } catch(e) { console.error("Auto delete failed", e); }
+             }, 1000); // 1s delay to not block UI
+          }
+
+          setResults(keptData);
+          setLoading(false);
+        });
+
+      } catch (error) {
+        handleFirestoreError(error, OperationType.LIST, 'results/batches');
+        setLoading(false);
       }
-      
-      setResults(finalData);
-      if (!examId && bData.length > 0 && !activeBatchId) {
-         setActiveBatchId(bData[0].id);
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'results/batches');
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+
+    fetchInitialData();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [examId]);
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -180,7 +167,10 @@ export function AdminResults() {
      uniqueDates = Array.from(new Set(displayResults.map(r => r.formattedDate).filter(d => d !== 'Unknown Date')));
      
      if (searchQuery) {
-       displayResults = displayResults.filter(r => (r.studentName || '').toLowerCase().includes(searchQuery.toLowerCase()));
+       displayResults = displayResults.filter(r => 
+         (r.studentName || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+         (r.examTitle || '').toLowerCase().includes(searchQuery.toLowerCase())
+       );
      }
      
      if (dateFilter) {

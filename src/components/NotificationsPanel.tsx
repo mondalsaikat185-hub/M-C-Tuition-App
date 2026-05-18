@@ -11,6 +11,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
   
   const [showCreate, setShowCreate] = useState(false);
   const [editItem, setEditItem] = useState<any | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [batches, setBatches] = useState<any[]>([]);
 
   // Form states
@@ -111,10 +112,17 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
      setShowCreate(true);
   };
 
-  const handleDelete = async (id: string) => {
-     if (!confirm("Are you sure? This will delete the notification for everyone.")) return;
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+     e.stopPropagation();
+     if (confirmDeleteId !== id) {
+        setConfirmDeleteId(id);
+        // Clear confirm state after a few seconds
+        setTimeout(() => setConfirmDeleteId(null), 3000);
+        return;
+     }
      try {
         await deleteDoc(doc(db, 'notifications', id));
+        setConfirmDeleteId(null);
      } catch(e) { console.error(e); }
   };
 
@@ -225,7 +233,9 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
                                 {user.role === 'admin' && (
                                    <div className="flex items-center gap-1">
                                       <button onClick={(e) => { e.stopPropagation(); handleEdit(notif); }} className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 transition-colors"><Edit className="w-3.5 h-3.5" /></button>
-                                      <button onClick={(e) => { e.stopPropagation(); handleDelete(notif.id); }} className="p-1 hover:bg-red-100 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                                      <button onClick={(e) => handleDelete(notif.id, e)} className="p-1 hover:bg-red-100 hover:text-red-600 transition-colors">
+                                         {confirmDeleteId === notif.id ? <span className="text-[10px] uppercase font-black px-1 text-red-600">Sure?</span> : <Trash2 className="w-3.5 h-3.5" />}
+                                      </button>
                                    </div>
                                 )}
                              </div>

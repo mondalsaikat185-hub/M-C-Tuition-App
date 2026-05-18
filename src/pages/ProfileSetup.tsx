@@ -35,16 +35,26 @@ export function ProfileSetup() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+    
+    // Strict validation
+    if (!fullName.trim() || !phone.trim() || !address.trim() || !joinDate.trim() || !batchId.trim()) {
+       alert("Please fill in all mandatory fields correctly.");
+       return;
+    }
+
     try {
       setLoading(true);
 
+      const statusUpdate = user.status === 'incomplete' ? { status: 'pending' } : {};
+
       await updateDoc(doc(db, 'users', user.uid), {
-         fullName,
-         phone,
-         address,
-         joinDate,
-         batchId,
+         fullName: fullName.trim(),
+         phone: phone.trim(),
+         address: address.trim(),
+         joinDate: joinDate.trim(),
+         batchId: batchId.trim(),
          isProfileComplete: true,
+         ...statusUpdate,
          updatedAt: serverTimestamp()
       });
       navigate('/student');

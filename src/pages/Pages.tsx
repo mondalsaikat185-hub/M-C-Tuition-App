@@ -33,7 +33,8 @@ export function PageHeader({ title, backTo, description, onBack }: { title: stri
 export function AdminStudents() {
   const [students, setStudents] = useState<AppUser[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
-  const [studentLastActive, setStudentLastActive] = useState<Record<string, number>>({});
+  const [studentAbsentCount, setStudentAbsentCount] = useState<Record<string, number>>({});
+  const [studentMarks, setStudentMarks] = useState<Record<string, {marks: string, examTitle: string}[]>>({});
   const [loading, setLoading] = useState(true);
   const [confirmDeleteStudentId, setConfirmDeleteStudentId] = useState<string | null>(null);
 
@@ -99,9 +100,10 @@ export function AdminStudents() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [studentsSnap, batchesSnap, resultsSnap] = await Promise.all([
+        const [studentsSnap, batchesSnap, attendanceSnap, resultsSnap] = await Promise.all([
           getDocs(collection(db, 'users')),
           getDocs(collection(db, 'batches')),
+          getDocs(collection(db, 'attendance')),
           getDocs(collection(db, 'results'))
         ]);
         
@@ -120,17 +122,53 @@ export function AdminStudents() {
         });
         setBatches(batchesData);
 
-        const lastActive: Record<string, number> = {};
-        resultsSnap.forEach((doc) => {
-          const r = doc.data();
-          if (r.studentId && r.createdAt) {
-            const time = r.createdAt.toMillis();
-            if (!lastActive[r.studentId] || time > lastActive[r.studentId]) {
-              lastActive[r.studentId] = time;
+        const absentCount: Record<string, number> = {};
+        
+        // Group attendance records by batch and sort by date
+        const attendanceByBatch: Record<string, { date: string; presentStudentIds: string[] }[]> = {};
+        attendanceSnap.forEach((doc) => {
+            const r = doc.data();
+            if (r.batchId && r.date && r.presentStudentIds) {
+                if (!attendanceByBatch[r.batchId]) attendanceByBatch[r.batchId] = [];
+                attendanceByBatch[r.batchId].push({
+                    date: r.date,
+                    presentStudentIds: r.presentStudentIds as string[]
+                });
             }
-          }
         });
-        setStudentLastActive(lastActive);
+
+        // Check only the last 8 sessions for each active student
+        studentsData.forEach(student => {
+            if (student.status !== 'active' || !student.batchId) return;
+            const sessions = (attendanceByBatch[student.batchId] || [])
+                .sort((a, b) => b.date.localeCompare(a.date))  // newest first
+                .slice(0, 8);  // last 8 sessions
+
+            let absent = 0;
+            sessions.forEach(session => {
+                if (!session.presentStudentIds.includes(student.uid)) {
+                    absent++;
+                }
+            });
+            absentCount[student.uid] = absent;
+        });
+        setStudentAbsentCount(absentCount);
+
+        const marksMap: Record<string, {marks: string, examTitle: string}[]> = {};
+        resultsSnap.forEach((doc) => {
+           const r = doc.data();
+           if (r.studentId && r.createdAt) {
+               const dt = r.createdAt.toDate();
+               const dateStr = dt.toISOString().split('T')[0];
+               const key = `${r.studentId}_${dateStr}`;
+               if (!marksMap[key]) marksMap[key] = [];
+               marksMap[key].push({
+                   marks: `${r.score}/${r.totalPossible}`,
+                   examTitle: r.examTitle || 'Exam'
+               });
+           }
+        });
+        setStudentMarks(marksMap);
 
       } catch (error) {
         handleFirestoreError(error, OperationType.LIST, 'users/batches');
@@ -166,12 +204,6 @@ export function AdminStudents() {
     } catch (error) {
        alert("Error deleting student: " + String(error));
     }
-  };
-
-  const getAbsenceDays = (lastActiveTime?: number) => {
-    if (!lastActiveTime) return Infinity; // Never attended
-    const diff = Date.now() - lastActiveTime;
-    return Math.floor(diff / (1000 * 60 * 60 * 24));
   };
 
   return (
@@ -395,11 +427,28 @@ export function AdminStudents() {
                             <td className="border-r-2 border-b border-zinc-200 dark:border-zinc-700 border-l border-zinc-200 px-3 py-2 font-bold whitespace-nowrap overflow-hidden text-ellipsis w-48 max-w-[192px]">
                               {student.fullName || student.email}
                             </td>
-                            {filteredRecords.map((r) => (
-                              <td key={r.date} className="border-r border-b border-zinc-200 dark:border-zinc-700 px-3 py-2 text-center text-xl">
-                                {r.presentStudentIds.includes(student.uid) ? '✅' : '❌'}
-                              </td>
-                            ))}
+                            {filteredRecords.map((r) => {
+                              const marksList = studentMarks[`${student.uid}_${r.date}`];
+                              return (
+                                <td key={r.date} className="border-r border-b border-zinc-200 dark:border-zinc-700 px-3 py-2 text-center align-middle">
+                                  <div className="flex flex-col items-center justify-center gap-1">
+                                    <span className="text-xl leading-none">{r.presentStudentIds.includes(student.uid) ? '✅' : '❌'}</span>
+                                    {marksList && marksList.length > 0 ? (
+                                      marksList.map((m, idx) => (
+                                          <span key={idx} className="flex flex-col items-center mt-1">
+                                            <span className="text-[8px] bg-zinc-800 text-white px-1 py-0.5 rounded-sm uppercase overflow-hidden text-ellipsis whitespace-nowrap max-w-[90px]">{m.examTitle}</span>
+                                            <span className="text-[10px] leading-none bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-black px-1.5 py-1 uppercase tracking-wide border border-blue-300 dark:border-blue-700 whitespace-nowrap shadow-[1px_1px_0px_0px_rgba(0,0,0,0.1)] mt-0.5">
+                                              Score: {m.marks}
+                                            </span>
+                                          </span>
+                                      ))
+                                    ) : (
+                                      <span className="text-[10px] leading-none opacity-0 select-none">No exams</span>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+                            })}
                           </tr>
                         );
                       })}
@@ -419,10 +468,10 @@ export function AdminStudents() {
           : studentTab === 'all'
             ? students.filter(s => s.status === 'active')
             : studentTab === 'at_risk'
-              ? students.filter(s => s.status === 'active' && s.batchId && getAbsenceDays(studentLastActive[s.uid]) >= 3 && getAbsenceDays(studentLastActive[s.uid]) !== Infinity)
+              ? students.filter(s => s.status === 'active' && s.batchId && (studentAbsentCount[s.uid] || 0) >= 3)
               : students.filter(s => s.status === 'active' && s.batchId === studentTab);
 
-        const atRiskCount = students.filter(s => s.status === 'active' && s.batchId && getAbsenceDays(studentLastActive[s.uid]) >= 3 && getAbsenceDays(studentLastActive[s.uid]) !== Infinity).length;
+        const atRiskCount = students.filter(s => s.status === 'active' && s.batchId && (studentAbsentCount[s.uid] || 0) >= 3).length;
 
         return (
           <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] overflow-x-auto w-full mt-8">
@@ -443,7 +492,7 @@ export function AdminStudents() {
                     studentTab === batch.id ? 'bg-blue-300 text-black' : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400'
                   }`}
                 >
-                  {batch.name}
+                  {batch.name} ({students.filter(s => s.status === 'active' && s.batchId === batch.id).length})
                 </button>
               ))}
               <button
@@ -487,7 +536,7 @@ export function AdminStudents() {
                     </tr>
                   )}
                   {displayStudents.map((student) => {
-                    const absentDays = getAbsenceDays(studentLastActive[student.uid]);
+                    const absentDays = studentAbsentCount[student.uid] || 0;
                     return (
                     <tr key={student.uid} className="border-b border-zinc-200 dark:border-zinc-800">
                       <td className="p-2">
@@ -506,17 +555,15 @@ export function AdminStudents() {
                         <div className="text-xs text-zinc-500">{student.email}</div>
                       </td>
                   <td className="p-2">
-                    {absentDays === Infinity ? (
-                      <span className="text-xs font-bold text-zinc-400 uppercase">Never tested</span>
-                    ) : absentDays >= 3 ? (
+                    {absentDays >= 3 ? (
                       <span className="inline-block px-2 py-1 bg-red-100 text-red-900 text-[10px] font-black uppercase border border-red-300">
-                        Absent: {absentDays} days
+                        Absent: {absentDays} exams
                       </span>
                     ) : absentDays === 0 ? (
-                      <span className="text-xs font-bold text-emerald-600 uppercase">Today</span>
+                      <span className="text-xs font-bold text-emerald-600 uppercase whitespace-nowrap">Up to date</span>
                     ) : (
-                      <span className="text-xs font-bold text-yellow-600 uppercase">
-                        {absentDays} day{absentDays > 1 ? 's' : ''} ago
+                      <span className="text-xs font-bold text-yellow-600 uppercase whitespace-nowrap">
+                        Missed: {absentDays} exam{absentDays > 1 ? 's' : ''}
                       </span>
                     )}
                   </td>
@@ -1842,7 +1889,9 @@ export function StudentPayments() {
                 (() => {
                    const upiId = (settings.adminUpiId || '').trim();
                    const am = calculatedAmount || 500;
-                   const genericUpi = `upi://pay?pa=${upiId}&pn=Tutor&am=${am}&cu=INR`;
+                   const formattedAm = Number(am).toFixed(2);
+                   const tn = encodeURIComponent('Tuition Fee');
+                   const genericUpi = `upi://pay?pa=${upiId}&pn=Tutor&am=${formattedAm}&cu=INR&tn=${tn}`;
                    return (
                       <>
                          <div className="bg-white p-2 border-2 border-zinc-900 inline-block mb-2">
@@ -1853,8 +1902,8 @@ export function StudentPayments() {
                          <p className="text-xs font-bold text-zinc-500 mt-2 mb-2">OR PAY USING APP</p>
                          <div className="flex flex-wrap justify-center gap-2 mb-2 w-full">
                             <a href={genericUpi} className="px-3 py-1.5 bg-purple-600 text-white font-bold text-xs hover:-translate-y-0.5 transition-transform">PhonePe / App</a>
-                            <a href={`tez://upi/pay?pa=${upiId}&pn=Tutor&am=${am}&cu=INR`} className="px-3 py-1.5 bg-white text-zinc-900 border-2 border-zinc-200 font-bold text-xs hover:-translate-y-0.5 transition-transform flex items-center gap-1"><span className="text-blue-500 font-black">G</span>Pay</a>
-                            <a href={`paytmmp://pay?pa=${upiId}&pn=Tutor&am=${am}&cu=INR`} className="px-3 py-1.5 bg-[#00b9f1] text-white font-bold text-xs hover:-translate-y-0.5 transition-transform">Paytm</a>
+                            <a href={`tez://upi/pay?pa=${upiId}&pn=Tutor&am=${formattedAm}&cu=INR&tn=${tn}`} className="px-3 py-1.5 bg-white text-zinc-900 border-2 border-zinc-200 font-bold text-xs hover:-translate-y-0.5 transition-transform flex items-center gap-1"><span className="text-blue-500 font-black">G</span>Pay</a>
+                            <a href={`paytmmp://pay?pa=${upiId}&pn=Tutor&am=${formattedAm}&cu=INR&tn=${tn}`} className="px-3 py-1.5 bg-[#00b9f1] text-white font-bold text-xs hover:-translate-y-0.5 transition-transform">Paytm</a>
                             <a href={genericUpi} className="px-3 py-1.5 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-bold text-xs hover:-translate-y-0.5 transition-transform">Any UPI</a>
                          </div>
                          

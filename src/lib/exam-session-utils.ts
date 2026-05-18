@@ -33,6 +33,22 @@ export async function createExamSession(
     createdAt: serverTimestamp(),
     createdBy: adminUid,
   });
+
+  // Initialize attendance for today if not already existing
+  const today = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+  const attendanceId = `${batchId}_${today}`;
+  const attendanceRef = doc(db, 'attendance', attendanceId);
+  const snap = await getDoc(attendanceRef);
+  if (!snap.exists()) {
+    await setDoc(attendanceRef, {
+      date: today,
+      batchId,
+      presentStudentIds: [],
+      examSessionId: docRef.id,
+      updatedAt: serverTimestamp(),
+    });
+  }
+
   return { sessionId: docRef.id, accessCode };
 }
 

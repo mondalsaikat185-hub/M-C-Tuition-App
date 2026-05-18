@@ -357,6 +357,12 @@ export function StudentLibrary() {
             return;
          }
 
+         if (item.type === 'exam' && item.contentUrl && (item.contentUrl.startsWith('http://') || item.contentUrl.startsWith('https://'))) {
+            // Check if it's an external link exam (not a google drive PDF link since it's an exam)
+            window.open(item.contentUrl, '_blank');
+            return;
+         }
+
          if (!user || !(user as any).batchId) {
             alert("প্রথমে একটি batch-এ যোগ দিন (Join a batch first)");
             return;
@@ -392,10 +398,25 @@ export function StudentLibrary() {
          const activeSession = activeSessionDoc.data();
 
          // Check if already a participant
-         const participants = activeSession.participants || [];
+         const participants = activeSession.participantUids || [];
          if (participants.includes(user.uid)) {
             setPreviewItem(item);
             return;
+         }
+
+         // Check if code is required
+         if (activeSession.codeEnabled === false) {
+             // No code needed — join directly
+             const result = await joinSessionWithoutCode(
+                 activeSessionDoc.id,
+                 activeSession,
+                 user.uid,
+                 (user as any).batchId
+             );
+             if (result === 'ok' || result === 'already_participated') {
+                 setPreviewItem(item);
+             }
+             return;
          }
 
          // Require code for new participant

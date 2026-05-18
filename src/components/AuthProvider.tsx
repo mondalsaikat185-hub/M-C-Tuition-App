@@ -13,7 +13,7 @@ import { auth, db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 
 export type UserRole = 'student' | 'admin';
-export type UserStatus = 'pending' | 'active' | 'inactive' | 'rejected';
+export type UserStatus = 'pending' | 'active' | 'inactive' | 'rejected' | 'incomplete';
 
 export interface AppUser {
   uid: string;
@@ -130,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               displayName: firebaseUser.displayName || null,
               photoURL: firebaseUser.photoURL || null,
               role: isAdmin ? 'admin' : (preCreatedData?.role || 'student'),
-              status: isAdmin ? 'active' : (preCreatedData?.status || 'pending'),
+              status: isAdmin ? 'active' : (preCreatedData?.status || 'incomplete'),
               batchId: preCreatedData?.batchId || null,
               phone: preCreatedData?.phone || null,
               fullName: preCreatedData?.fullName || null,

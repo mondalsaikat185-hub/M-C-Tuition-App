@@ -165,6 +165,28 @@ export function AdminLibrary() {
      const reader = new FileReader();
      reader.onload = (evo) => {
         const text = evo.target?.result as string;
+
+        if (uploadFile.name.endsWith('.json')) {
+            try {
+                const parsed = JSON.parse(text);
+                if (Array.isArray(parsed)) {
+                    setQuizData(JSON.stringify(parsed, null, 2));
+                    setAutoExtractMsg(`✅ JSON থেকে ${parsed.length}টি প্রশ্ন extract হয়েছে!`);
+                } else if (parsed && parsed.questions && Array.isArray(parsed.questions)) {
+                    setQuizData(JSON.stringify(parsed, null, 2));
+                    setAutoExtractMsg(`✅ JSON থেকে ${parsed.questions.length}টি প্রশ্ন extract হয়েছে!`);
+                    if (parsed.config?.totalTime) setTimeLimit(Math.floor(parsed.config.totalTime / 60));
+                    if (parsed.config?.marksCorrect) setMarksCorrect(parsed.config.marksCorrect);
+                    if (parsed.config?.marksWrong) setMarksWrong(Math.abs(parsed.config.marksWrong));
+                } else {
+                    setAutoExtractMsg('JSON format সঠিক নয়। Array অথবা {questions:[...]} format হওয়া উচিত।');
+                }
+            } catch (err: any) {
+                setAutoExtractMsg('JSON parse error: ' + err.message);
+            }
+            return;
+        }
+
         try {
           const patterns = [
             /(?:const|let|var)\s+questions\s*=\s*(\[[\s\S]*?\]);/,
@@ -326,8 +348,12 @@ export function AdminLibrary() {
            alert("Please provide a valid document or a link.");
            setSubmitting(false);
            return;
-        } else if (itemType === 'exam' && !quizData) {
-           alert("Please paste the Quiz JSON or upload a file containing the questions array.");
+        } else if (itemType === 'exam' && examType !== 'Online Link' && !quizData && !contentUrl) {
+           alert("Please paste the Quiz JSON, upload a file containing questions, or provide an External Exam Link.");
+           setSubmitting(false);
+           return;
+        } else if (itemType === 'exam' && examType === 'Online Link' && !contentUrl) {
+           alert("Please provide the External Exam Link.");
            setSubmitting(false);
            return;
         }
@@ -344,7 +370,11 @@ export function AdminLibrary() {
 
         if (itemType === 'exam') {
            payload.examType = examType;
-           payload.quizData = quizData;
+           if (examType === 'Online Link') {
+              payload.contentUrl = contentUrl;
+           } else {
+              payload.quizData = quizData;
+           }
            payload.timeLimit = timeLimit;
            payload.marksCorrect = marksCorrect;
            payload.marksWrong = marksWrong;
@@ -948,9 +978,12 @@ export function AdminLibrary() {
                             <option value="Error Correction">Error Correction</option>
                             <option value="Parajumble">Parajumble</option>
                             <option value="Comprehension">Comprehension</option>
+                            <option value="Online Link">Online Link / GitHub</option>
                          </select>
                        </div>
                        
+                       {examType !== 'Online Link' ? (
+                       <>
                        <div className="grid grid-cols-3 gap-2">
                          <div>
                             <label className="block text-xs font-bold uppercase mb-1">Time (Mins)</label>
@@ -972,8 +1005,8 @@ export function AdminLibrary() {
                        </label>
 
                        <div>
-                         <label className="block text-xs font-bold uppercase mb-1 text-emerald-600 dark:text-emerald-400">1. Auto-extract via JS/HTML Upload</label>
-                         <input type="file" accept=".js,.html" onChange={handleFileExtraction} className="text-sm w-full file:mr-4 file:py-2 file:px-4 file:border-2 file:border-zinc-900 dark:file:border-zinc-100 file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-900 dark:file:text-white file:font-bold file:uppercase file:text-xs" />
+                         <label className="block text-xs font-bold uppercase mb-1 text-emerald-600 dark:text-emerald-400">1. Auto-extract via JS/HTML/JSON Upload</label>
+                         <input type="file" accept=".js,.html,.json" onChange={handleFileExtraction} className="text-sm w-full file:mr-4 file:py-2 file:px-4 file:border-2 file:border-zinc-900 dark:file:border-zinc-100 file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-900 dark:file:text-white file:font-bold file:uppercase file:text-xs" />
                          {autoExtractMsg && <div className="text-xs font-bold text-orange-600 mt-2 bg-orange-50 p-2 border border-orange-200">{autoExtractMsg}</div>}
                        </div>
 
@@ -981,6 +1014,14 @@ export function AdminLibrary() {
                          <label className="block text-xs font-bold uppercase mb-1 text-blue-600 dark:text-blue-400">2. Or Paste JSON Data</label>
                          <textarea value={quizData} onChange={e => setQuizData(e.target.value)} rows={4} className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none font-mono text-xs" placeholder="[ { question_en: '...' } ]"></textarea>
                        </div>
+                       </>
+                       ) : (
+                       <div>
+                         <label className="block text-xs font-bold uppercase mb-1 text-purple-600 dark:text-purple-400">External Exam Link * (GitHub/Google Form)</label>
+                         <input type="url" required value={contentUrl} onChange={e => setContentUrl(e.target.value)} className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-white dark:bg-zinc-900 focus:outline-none text-sm" placeholder="https://..." />
+                         <p className="text-[10px] text-zinc-500 mt-1">Student click করলে browser-এ এই link open হবে</p>
+                       </div>
+                       )}
                      </div>
                   )}
 
