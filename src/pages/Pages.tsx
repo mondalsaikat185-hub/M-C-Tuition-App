@@ -1371,6 +1371,20 @@ export function AdminPayments() {
      }
   };
 
+  const rejectModal = rejectingPaymentId ? (
+    <div className="fixed inset-0 bg-black/80 flex justify-center items-center z-[100] p-4">
+      <div className="bg-white dark:bg-zinc-900 border-4 border-red-600 dark:border-red-500 w-full max-w-md p-6 transform transition-all scale-100 shadow-[8px_8px_0px_0px_rgba(220,38,38,1)]">
+        <h3 className="font-black text-xl text-red-600 uppercase mb-4">Reject Payment Request</h3>
+        <p className="text-zinc-500 font-bold text-xs mb-2 uppercase">Please provide a reason for the rejection.</p>
+        <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 text-sm bg-transparent mb-4 outline-none focus:border-red-500" placeholder="e.g. Transaction ID invalid" rows={3} />
+        <div className="flex gap-4">
+          <button onClick={() => updatePaymentStatus(rejectingPaymentId, 'rejected', rejectReason || 'Payment declined by admin.')} className="flex-1 border-2 border-red-600 bg-red-600 text-white shadow-[4px_4px_0px_0px_rgba(153,27,27,1)] font-bold uppercase py-2 hover:-translate-y-0.5 transition-transform">Reject</button>
+          <button onClick={() => setRejectingPaymentId(null)} className="flex-1 border-2 border-zinc-900 dark:border-zinc-100 bg-zinc-200 dark:bg-zinc-800 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] font-bold uppercase py-2 hover:-translate-y-0.5 transition-transform">Cancel</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   if (loading) return <div className="p-8 flex justify-center"><Loader2 className="animate-spin w-8 h-8" /></div>;
 
   if (selectedStudentId) {
@@ -1380,19 +1394,7 @@ export function AdminPayments() {
 
      return (
        <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full space-y-6 relative">
-          {rejectingPaymentId && (
-            <div className="fixed inset-0 bg-black/80 flex justify-center items-center z-[100] p-4">
-              <div className="bg-white dark:bg-zinc-900 border-4 border-red-600 dark:border-red-500 w-full max-w-md p-6 transform transition-all scale-100 shadow-[8px_8px_0px_0px_rgba(220,38,38,1)]">
-                <h3 className="font-black text-xl text-red-600 uppercase mb-4">Reject Payment Request</h3>
-                <p className="text-zinc-500 font-bold text-xs mb-2 uppercase">Please provide a reason for the rejection.</p>
-                <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 text-sm bg-transparent mb-4 outline-none focus:border-red-500" placeholder="e.g. Transaction ID invalid" rows={3} />
-                <div className="flex gap-4">
-                  <button onClick={() => updatePaymentStatus(rejectingPaymentId, 'rejected', rejectReason || 'Payment declined by admin.')} className="flex-1 border-2 border-red-600 bg-red-600 text-white shadow-[4px_4px_0px_0px_rgba(153,27,27,1)] font-bold uppercase py-2 hover:-translate-y-0.5 transition-transform">Reject</button>
-                  <button onClick={() => setRejectingPaymentId(null)} className="flex-1 border-2 border-zinc-900 dark:border-zinc-100 bg-zinc-200 dark:bg-zinc-800 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] font-bold uppercase py-2 hover:-translate-y-0.5 transition-transform">Cancel</button>
-                </div>
-              </div>
-            </div>
-          )}
+          {rejectModal}
 
          <div className="flex items-center gap-4">
             <button onClick={() => setSelectedStudentId(null)} className="px-3 py-1.5 bg-zinc-200 dark:bg-zinc-800 font-bold uppercase text-xs hover:-translate-y-0.5 border-2 border-zinc-900 dark:border-zinc-100 flex items-center gap-1"><ArrowLeft className="w-3.5 h-3.5"/> Back</button>
@@ -1546,7 +1548,8 @@ export function AdminPayments() {
   const allPending = payments.filter(p => p.status === 'pending');
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full relative">
+      {rejectModal}
       <PageHeader title="Payments Management" backTo="/admin" />
 
       <div className="mb-8 border-4 border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 p-6">
