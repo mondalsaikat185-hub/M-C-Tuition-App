@@ -195,79 +195,46 @@ export function StudentLibrary() {
       }
   };
 
+  const ORACLE_SERVER_URL = 'https://saikat-tuition.duckdns.org';
+  const ORACLE_API_KEY = 'tuition-secret-2026-change-this';
+
   const handleDownloadUrl = async (item: LibraryItem) => {
      if (!item.contentUrl || !item.id) return;
+     
      try {
         setDownloadingId(item.id);
         
-        let targetUrl = item.contentUrl;
-        let res = await fetch(targetUrl).catch(() => null);
-        
-        // If Direct Fetch fails (likely CORS from Google Drive), try a sequence of CORS Proxies
-        if (!res || !res.ok) {
-           const proxies = [
-               `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
-               `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-               `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
-               `https://thingproxy.freeboard.io/fetch/${targetUrl}`
-           ];
-           for (const proxyUrl of proxies) {
-               try {
-                  res = await fetch(proxyUrl);
-                  if (res && res.ok) break;
-               } catch (err) {
-                  // Ignore and try next
-               }
-           }
-           if (!res || !res.ok) throw new Error("CORS Proxy Fetch failed for all proxies");
-        }
-        
-        const arrayBuffer = await res.arrayBuffer();
-        
-        let byteArray: any = new Uint8Array(arrayBuffer);
-        try {
-           const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
-           const pdfDoc = await PDFDocument.load(byteArray);
-           const pages = pdfDoc.getPages();
-           const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-           const watermarkText = `Downloaded by: ${user?.fullName || user?.displayName || user?.email || 'Student'} | ${new Date().toLocaleString('en-IN')}`;
-           
-           for (const page of pages) {
-             const { width, height } = page.getSize();
-             const textSize = 9;
-             const textWidth = font.widthOfTextAtSize(watermarkText, textSize);
-             page.drawText(watermarkText, {
-               x: width - textWidth - 15,
-               y: height - 20,
-               size: textSize,
-               font: font,
-               color: rgb(0.5, 0.5, 0.5),
-               opacity: 0.4,
-             });
-           }
-           byteArray = await pdfDoc.save();
-        } catch (watermarkErr) {
-           console.warn("Could not add watermark to URL item:", watermarkErr);
+        const fileIdMatch = item.contentUrl.match(/[-\w]{25,}/);
+        const fileId = fileIdMatch ? fileIdMatch[0] : null;
+        if (!fileId) { alert('Invalid file link.'); return; }
+
+        const studentName = user?.fullName || user?.displayName || user?.email || 'Student';
+        const phone = user?.phone || '0000000000';
+        const fileName = `${item.title || 'document'}.pdf`;
+
+        // Small notification to user
+        alert(`Downloading... Password will be your phone number: ${phone}`);
+
+        const response = await fetch(`${ORACLE_SERVER_URL}/download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: ORACLE_API_KEY, fileId, name: studentName, phone, fileName })
+        });
+
+        if (!response.ok) { 
+           alert('Download failed. Please try again.'); 
+           return; 
         }
 
-        try {
-           if (user?.phone && user.phone.trim()) {
-               const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
-               const phonePassword = user.phone.trim();
-               byteArray = (await encryptPDF(byteArray, phonePassword)) as any;
-               alert(`This PDF has been securely downloaded and password protected.\nPassword to open: ${phonePassword}`);
-           }
-        } catch (pdfErr) {
-           console.warn("Could not encrypt PDF with phone number:", pdfErr);
-        }
-
-        const blob = new Blob([byteArray], { type: 'application/pdf' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = item.fileName || 'note.pdf';
-        link.click();
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
      } catch (e: any) {
-        console.error("Direct download with watermark failed.", e);
+        console.error("Direct download from Oracle PDF server failed.", e);
         const fallback = window.confirm(
             "ডাউনলোড করতে সমস্যা হচ্ছে।\n\nআপনি কি সরাসরি গুগল ড্রাইভ লিংক ব্যবহার করে পিডিএফ-টি খুলতে চান?"
         );
