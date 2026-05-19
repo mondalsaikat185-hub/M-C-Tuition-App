@@ -231,10 +231,14 @@ export function StudentLibrary() {
       const a = document.createElement('a');
       a.href = url;
       a.download = fileName;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
       
-      alert(`✓ Downloaded!\nPassword: ${password}\n(আপনার ফোন নম্বর)`);
+      setTimeout(() => {
+         URL.revokeObjectURL(url);
+         alert(`✓ Downloaded!\nPassword: ${password}\n(আপনার ফোন নম্বর)`);
+      }, 100);
     } catch (error) {
       alert('Download error. Check your connection.');
       console.error(error);
@@ -293,7 +297,7 @@ export function StudentLibrary() {
                const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
                const phonePassword = user.phone.trim();
                byteArray = (await encryptPDF(byteArray, phonePassword)) as any;
-               alert(`This PDF has been securely downloaded and password protected.\nPassword to open: ${phonePassword}`);
+               /* alert moved */
            }
         } catch (pdfErr) {
            console.warn("Could not encrypt PDF with phone number:", pdfErr);
@@ -305,7 +309,7 @@ export function StudentLibrary() {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = item.fileName || 'note.pdf';
-        link.click();
+        document.body.appendChild(link); link.click(); document.body.removeChild(link); setTimeout(() => { URL.revokeObjectURL(link.href); if (user?.phone && user.phone.trim()) { alert(`This PDF has been securely downloaded and password protected.\nPassword to open: ${user.phone.trim()}`); } }, 100);
      } catch (err) {
         console.error('Download failed:', err);
         alert('Download failed. Please try again.');
