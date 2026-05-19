@@ -17,7 +17,7 @@ export function AdminResults() {
   const [showConfirm, setShowConfirm] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [examFilter, setExamFilter] = useState('');
   const [tab, setTab] = useState<'latest' | 'student' | 'exam'>('latest');
 
   useEffect(() => {
@@ -159,12 +159,12 @@ export function AdminResults() {
   };
 
   let displayResults = [...results];
-  let uniqueDates: string[] = [];
+  let uniqueExams: string[] = [];
 
   if (!examId) {
      displayResults = displayResults.filter(r => r.studentBatchId === activeBatchId);
      
-     uniqueDates = Array.from(new Set(displayResults.map(r => r.formattedDate).filter(d => d !== 'Unknown Date')));
+     uniqueExams = Array.from(new Set(displayResults.map(r => r.examTitle).filter(d => Boolean(d))));
      
      if (searchQuery) {
        displayResults = displayResults.filter(r => 
@@ -173,8 +173,8 @@ export function AdminResults() {
        );
      }
      
-     if (dateFilter) {
-       displayResults = displayResults.filter(r => r.formattedDate === dateFilter);
+     if (examFilter) {
+       displayResults = displayResults.filter(r => r.examTitle === examFilter);
      }
   } else {
      if (tab === 'student') {
@@ -192,12 +192,12 @@ export function AdminResults() {
         <div className="mb-6 border-4 border-black bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] flex flex-col">
           <div className="flex overflow-x-auto border-b-4 border-black scrollbar-hide">
             {batches.map(batch => (
-              <button
+                <button
                 key={batch.id}
                 onClick={() => {
                    setActiveBatchId(batch.id);
                    setSearchQuery('');
-                   setDateFilter('');
+                   setExamFilter('');
                 }}
                 className={`px-4 py-3 font-bold text-sm uppercase whitespace-nowrap border-r-4 border-black transition-colors ${
                   activeBatchId === batch.id 
@@ -225,14 +225,14 @@ export function AdminResults() {
                </div>
              </div>
              <div className="flex-1">
-               <label className="block text-xs font-bold uppercase mb-1">Filter by Date</label>
+               <label className="block text-xs font-bold uppercase mb-1">Filter by Exam Title</label>
                <select
-                 value={dateFilter}
-                 onChange={(e) => setDateFilter(e.target.value)}
+                 value={examFilter}
+                 onChange={(e) => setExamFilter(e.target.value)}
                  className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-white dark:bg-zinc-900 text-sm focus:outline-none"
                >
-                 <option value="">All Dates</option>
-                 {uniqueDates.map(d => (
+                 <option value="">All Exams</option>
+                 {uniqueExams.map(d => (
                    <option key={d} value={d}>{d}</option>
                  ))}
                </select>
