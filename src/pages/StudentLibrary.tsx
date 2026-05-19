@@ -42,6 +42,7 @@ export function StudentLibrary() {
   };
   
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadMessage, setDownloadMessage] = useState<{title: string; body: string; isWarning?: boolean} | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Exam session
@@ -215,38 +216,71 @@ export function StudentLibrary() {
       const response = await fetch(`${ORACLE_SERVER_URL}/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          key: ORACLE_API_KEY, 
-          fileId, 
-          name: studentName, 
-          phone, 
-          fileName 
-        })
+        body: JSON.stringify({ key: ORACLE_API_KEY, fileId, name: studentName, phone, fileName })
       });
 
-      if (!response.ok) { alert('Download failed. Please try again.'); return; }
+      if (!response.ok) {
+        setDownloadMessage({ title: '❌ Download Failed', body: 'Server error. Please try again later.', isWarning: true });
+        return;
+      }
 
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
+
+      // Detect restricted environments
+      const ua = navigator.userAgent;
+      const isIOS = /iPad|iPhone|iPod/.test(ua) && !(window as any).MSStream;
+      const isInAppBrowser = /(Instagram|FBAN|FBAV|TwitterAndroid|Line\/|WhatsApp|Snapchat|MicroMessenger|GSA\/)/i.test(ua);
+
+      if (isInAppBrowser) {
+        // In-app browsers (Facebook, Instagram, WhatsApp, etc.) silently block all downloads.
+        // The blob is useless here — revoke it and tell the user to open in system browser.
+        URL.revokeObjectURL(blobUrl);
+        setDownloadMessage({
+          title: '⚠️ Browser Not Supported',
+          body: `আপনি WhatsApp / Instagram-এর ভেতরের browser ব্যবহার করছেন। এই browser-এ PDF download হয় না।\n\nPlease open this app in Chrome (Android) or Safari (iOS):\n\nAndroid: উপরের ⋮ মেনু → "Open in Chrome"\niOS: নিচের Share বাটন → "Open in Safari"\n\nতারপর আবার Download করুন।\n\nPassword হবে: ${password}`,
+          isWarning: true
+        });
+        return;
+      }
+
+      if (isIOS) {
+        // iOS Safari does not support <a download> — it opens the blob URL as a new page.
+        // Instead, open in new tab so user can use the PDF viewer's Share → Save to Files.
+        const newTab = window.open(blobUrl, '_blank');
+        if (!newTab) {
+          // Pop-up blocked — fall back to same-tab navigation
+          window.location.href = blobUrl;
+        }
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 90000);
+        setDownloadMessage({
+          title: '📄 PDF Opened in Browser',
+          body: `PDF টি browser-এ খুলেছে।\n\nসেভ করতে:\n1. Share বাটন (📤) এ ট্যাপ করুন\n2. "Save to Files" বেছে নিন\n\nPassword: ${password}\n(আপনার ফোন নম্বর)`,
+          isWarning: false
+        });
+        return;
+      }
+
+      // Standard download: Android Chrome, desktop browsers
       const a = document.createElement('a');
-      a.href = url;
+      a.href = blobUrl;
       a.download = fileName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      
-      setTimeout(() => {
-         URL.revokeObjectURL(url);
-      }, 60000);
-      
-      setTimeout(() => {
-         alert(`✓ Downloaded!\nPassword: ${password}\n(আপনার ফোন নম্বর)`);
-      }, 500);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+
+      setDownloadMessage({
+        title: '✅ Download শুরু হয়েছে!',
+        body: `PDF টি Downloads folder-এ সেভ হচ্ছে।\n\nPassword: ${password}\n(আপনার ফোন নম্বর)\n\nFile টি open করতে এই password দিন।`,
+        isWarning: false
+      });
+
     } catch (error) {
-      alert('Download error. Check your connection.');
+      setDownloadMessage({ title: '❌ Connection Error', body: 'Download করা যাচ্ছে না। Internet connection চেক করুন এবং adaptive try করুন।', isWarning: true });
       console.error(error);
     } finally {
-      if (item.id) setDownloadingId(null);
+      setDownloadingId(null);
     }
   };
 
@@ -308,14 +342,57 @@ export function StudentLibrary() {
         
         const blob = new Blob([byteArray], { type: 'application/pdf' });
         
+        const blobUrl = URL.createObjectURL(blob);
+        const password = user?.phone?.trim() || '';
+
+        // Detect restricted environments
+        const ua = navigator.userAgent;
+        const isIOS = /iPad|iPhone|iPod/.test(ua) && !(window as any).MSStream;
+        const isInAppBrowser = /(Instagram|FBAN|FBAV|TwitterAndroid|Line\/|WhatsApp|Snapchat|MicroMessenger|GSA\/)/i.test(ua);
+
+        if (isInAppBrowser) {
+          URL.revokeObjectURL(blobUrl);
+          setDownloadMessage({
+            title: '⚠️ Browser Not Supported',
+            body: `আপনি WhatsApp / Instagram-এর ভেতরের browser ব্যবহার করছেন। এই browser-এ PDF download হয় না।\n\nPlease open this app in Chrome (Android) or Safari (iOS):\n\nAndroid: উপরের ⋮ মেনু → "Open in Chrome"\niOS: নিচের Share বাটন → "Open in Safari"\n\nতারপর আবার Download করুন।\n\nPassword হবে: ${password}`,
+            isWarning: true
+          });
+          return;
+        }
+
+        if (isIOS) {
+          const newTab = window.open(blobUrl, '_blank');
+          if (!newTab) window.location.href = blobUrl;
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 90000);
+          setDownloadMessage({
+            title: '📄 PDF Opened in Browser',
+            body: `PDF টি browser-এ খুলেছে।\n\nসেভ করতে:\n1. Share বাটন (📤) এ ট্যাপ করুন\n2. "Save to Files" বেছে নিন\n\nPassword: ${password}\n(আপনার ফোন নম্বর)`,
+            isWarning: false
+          });
+          return;
+        }
+
         // Download
         const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
+        link.href = blobUrl;
         link.download = item.fileName || 'note.pdf';
-        document.body.appendChild(link); link.click(); document.body.removeChild(link); setTimeout(() => { URL.revokeObjectURL(link.href); }, 60000); if (user?.phone && user.phone.trim()) { setTimeout(() => { alert(`This PDF has been securely downloaded and password protected.\\nPassword to open: ${user.phone.trim()}`); }, 500); }
+        document.body.appendChild(link); 
+        link.click(); 
+        document.body.removeChild(link); 
+        setTimeout(() => { URL.revokeObjectURL(link.href); }, 60000); 
+        
+        if (password) {
+            setTimeout(() => { 
+                setDownloadMessage({ 
+                    title: '✅ Download শুরু হয়েছে!', 
+                    body: `PDF টি Downloads folder-এ সেভ হচ্ছে।\n\nPassword: ${password}\n(আপনার ফোন নম্বর)\n\nFile টি open করতে এই password দিন।` 
+                }); 
+            }, 500); 
+        }
+
      } catch (err) {
         console.error('Download failed:', err);
-        alert('Download failed. Please try again.');
+        setDownloadMessage({ title: '❌ Error', body: 'Download failed. Please try again.', isWarning: true });
      } finally {
         setDownloadingId(null);
      }
@@ -531,6 +608,23 @@ export function StudentLibrary() {
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
+      {downloadMessage && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border-4 border-black p-6 w-full max-w-sm shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)]">
+            <h3 className={`text-xl font-black uppercase mb-4 ${downloadMessage.isWarning ? 'text-red-600 dark:text-red-500' : 'text-green-600 dark:text-green-500'}`}>{downloadMessage.title}</h3>
+            <p className="text-sm font-bold text-zinc-600 dark:text-zinc-400 whitespace-pre-line mb-6">
+               {downloadMessage.body}
+            </p>
+            <button
+               onClick={() => setDownloadMessage(null)}
+               className="w-full bg-black text-white hover:bg-zinc-800 px-4 py-3 font-bold text-sm uppercase transition-colors"
+            >
+               OK
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
           <PageHeader 
              title="My Target Library" 
