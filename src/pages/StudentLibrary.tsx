@@ -237,8 +237,11 @@ export function StudentLibrary() {
       
       setTimeout(() => {
          URL.revokeObjectURL(url);
+      }, 60000);
+      
+      setTimeout(() => {
          alert(`✓ Downloaded!\nPassword: ${password}\n(আপনার ফোন নম্বর)`);
-      }, 100);
+      }, 500);
     } catch (error) {
       alert('Download error. Check your connection.');
       console.error(error);
@@ -309,7 +312,7 @@ export function StudentLibrary() {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = item.fileName || 'note.pdf';
-        document.body.appendChild(link); link.click(); document.body.removeChild(link); setTimeout(() => { URL.revokeObjectURL(link.href); if (user?.phone && user.phone.trim()) { alert(`This PDF has been securely downloaded and password protected.\nPassword to open: ${user.phone.trim()}`); } }, 100);
+        document.body.appendChild(link); link.click(); document.body.removeChild(link); setTimeout(() => { URL.revokeObjectURL(link.href); }, 60000); if (user?.phone && user.phone.trim()) { setTimeout(() => { alert(`This PDF has been securely downloaded and password protected.\\nPassword to open: ${user.phone.trim()}`); }, 500); }
      } catch (err) {
         console.error('Download failed:', err);
         alert('Download failed. Please try again.');
