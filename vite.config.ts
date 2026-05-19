@@ -14,30 +14,35 @@ export default defineConfig(({mode}) => {
         registerType: 'autoUpdate',
         manifest: {
           name: 'Mondal Coaching',
-          short_name: 'MC Exams',
-          description: 'Mondal Coaching Live Exam Portal',
-          theme_color: '#000000', // deep royal blue or black
+          short_name: 'Target App',
+          description: 'Mondal Coaching Live Portal',
+          theme_color: '#000000',
           background_color: '#000000',
           display: 'standalone',
-          start_url: '/',
+          start_url: '/?v=2',
           icons: [
             {
-              src: 'pwa-192x192.png',
+              src: '/pwa-192x192.png?v=2',
               sizes: '192x192',
               type: 'image/png'
             },
             {
-              src: 'pwa-512x512.png',
+              src: '/pwa-512x512.png?v=2',
               sizes: '512x512',
               type: 'image/png'
             },
             {
-              src: 'pwa-512x512.png',
+              src: '/pwa-512x512.png?v=2',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any maskable'
             }
           ]
+        },
+        workbox: {
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true
         }
       })
     ],

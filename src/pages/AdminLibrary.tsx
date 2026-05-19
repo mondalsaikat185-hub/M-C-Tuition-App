@@ -95,6 +95,7 @@ export function AdminLibrary() {
   const [allowMultipleAttempts, setAllowMultipleAttempts] = useState(false);
   // Note extra
   const [linkUrl, setLinkUrl] = useState('');
+  const [contentUrl, setContentUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
   
@@ -465,6 +466,7 @@ export function AdminLibrary() {
      setTrackingId('');
      setQuizData('');
      setLinkUrl('');
+     setContentUrl('');
      setFile(null);
      setPdfPassword('');
      setAutoExtractMsg('');
@@ -868,9 +870,15 @@ export function AdminLibrary() {
                  )}
                  {item.type === 'exam' && (
                     <>
-                     <button onClick={() => setPreviewItem(item)} className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 border border-zinc-300 dark:border-zinc-700 font-bold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 whitespace-nowrap">
-                       <Eye className="w-3.5 h-3.5" /> Preview
-                     </button>
+                     {item.examType === 'Online Link' && item.contentUrl ? (
+                        <a href={item.contentUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 border border-zinc-300 dark:border-zinc-700 font-bold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 whitespace-nowrap">
+                          <Eye className="w-3.5 h-3.5" /> Preview
+                        </a>
+                     ) : (
+                        <button onClick={() => setPreviewItem(item)} className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 border border-zinc-300 dark:border-zinc-700 font-bold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 whitespace-nowrap">
+                          <Eye className="w-3.5 h-3.5" /> Preview
+                        </button>
+                     )}
                      <a href={`/admin/results/${item.id}`} className="flex items-center gap-1 bg-blue-100 text-blue-800 border border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800 px-3 py-1.5 font-bold text-xs hover:bg-blue-200 whitespace-nowrap">
                        <FileText className="w-3.5 h-3.5" /> Results
                      </a>

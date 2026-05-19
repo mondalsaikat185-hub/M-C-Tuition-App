@@ -1333,7 +1333,8 @@ export function AdminPayments() {
   const monthOptions = [
     ...monthNames.map(m => `${m} ${currentYear - 1}`),
     ...monthNames.map(m => `${m} ${currentYear}`),
-    ...monthNames.map(m => `${m} ${currentYear + 1}`)
+    ...monthNames.map(m => `${m} ${currentYear + 1}`),
+    ...monthNames.map(m => `${m} ${currentYear + 2}`)
   ];
 
   const fetchAll = async () => {
@@ -1716,9 +1717,17 @@ export function StudentPayments() {
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
   const [settings, setSettings] = useState({ adminUpiId: '', enablePaymentSystem: true });
+  const [userProfile, setUserProfile] = useState<any>(null);
 
-  const monthlyFeeAmount = Number((user as any)?.monthlyFee) || 0;
-  const isFeeWaived = monthlyFeeAmount === 0 && (user as Record<string,any>).monthlyFee !== undefined;
+  useEffect(() => {
+    if (!user) return;
+    getDoc(doc(db, 'users', user.uid)).then(snap => {
+      if (snap.exists()) setUserProfile(snap.data());
+    }).catch(console.error);
+  }, [user]);
+
+  const monthlyFeeAmount = Number(userProfile?.monthlyFee) || 0;
+  const isFeeWaived = userProfile?.monthlyFee === 0;
   
   const calculatedAmount = selectedMonths.length > 0 ? selectedMonths.length * (monthlyFeeAmount > 0 ? monthlyFeeAmount : 500) : (monthlyFeeAmount > 0 ? monthlyFeeAmount : 500);
 
@@ -1759,13 +1768,12 @@ export function StudentPayments() {
   }, [user?.uid]);
 
   const currentYear = new Date().getFullYear();
-  const nextYear = currentYear + 1;
-  const prevYear = currentYear - 1;
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const monthOptions = [
-    ...monthNames.map(m => `${m} ${prevYear}`),
+    ...monthNames.map(m => `${m} ${currentYear - 1}`),
     ...monthNames.map(m => `${m} ${currentYear}`),
-    ...monthNames.map(m => `${m} ${nextYear}`)
+    ...monthNames.map(m => `${m} ${currentYear + 1}`),
+    ...monthNames.map(m => `${m} ${currentYear + 2}`)
   ];
 
   const toggleMonth = (m: string) => {
@@ -1888,10 +1896,10 @@ export function StudentPayments() {
              {settings.adminUpiId ? (
                 (() => {
                    const upiId = (settings.adminUpiId || '').trim();
-                   const am = calculatedAmount || 500;
-                   const formattedAm = Number(am).toFixed(2);
-                   const tn = encodeURIComponent('Tuition Fee');
-                   const genericUpi = `upi://pay?pa=${upiId}&pn=Tutor&am=${formattedAm}&cu=INR&tn=${tn}`;
+                   const am = Number(calculatedAmount || 500).toFixed(2);
+                   const tn = encodeURIComponent(`Tuition Fee`);
+                   const pn = encodeURIComponent('Tutor');
+                   const genericUpi = `upi://pay?pa=${upiId}&pn=${pn}&am=${am}&tn=${tn}&cu=INR`;
                    return (
                       <>
                          <div className="bg-white p-2 border-2 border-zinc-900 inline-block mb-2">
@@ -1902,8 +1910,8 @@ export function StudentPayments() {
                          <p className="text-xs font-bold text-zinc-500 mt-2 mb-2">OR PAY USING APP</p>
                          <div className="flex flex-wrap justify-center gap-2 mb-2 w-full">
                             <a href={genericUpi} className="px-3 py-1.5 bg-purple-600 text-white font-bold text-xs hover:-translate-y-0.5 transition-transform">PhonePe / App</a>
-                            <a href={`tez://upi/pay?pa=${upiId}&pn=Tutor&am=${formattedAm}&cu=INR&tn=${tn}`} className="px-3 py-1.5 bg-white text-zinc-900 border-2 border-zinc-200 font-bold text-xs hover:-translate-y-0.5 transition-transform flex items-center gap-1"><span className="text-blue-500 font-black">G</span>Pay</a>
-                            <a href={`paytmmp://pay?pa=${upiId}&pn=Tutor&am=${formattedAm}&cu=INR&tn=${tn}`} className="px-3 py-1.5 bg-[#00b9f1] text-white font-bold text-xs hover:-translate-y-0.5 transition-transform">Paytm</a>
+                            <a href={`tez://upi/pay?pa=${upiId}&pn=${pn}&am=${am}&tn=${tn}&cu=INR`} className="px-3 py-1.5 bg-white text-zinc-900 border-2 border-zinc-200 font-bold text-xs hover:-translate-y-0.5 transition-transform flex items-center gap-1"><span className="text-blue-500 font-black">G</span>Pay</a>
+                            <a href={`paytmmp://pay?pa=${upiId}&pn=${pn}&am=${am}&tn=${tn}&cu=INR`} className="px-3 py-1.5 bg-[#00b9f1] text-white font-bold text-xs hover:-translate-y-0.5 transition-transform">Paytm</a>
                             <a href={genericUpi} className="px-3 py-1.5 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 font-bold text-xs hover:-translate-y-0.5 transition-transform">Any UPI</a>
                          </div>
                          

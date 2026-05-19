@@ -284,7 +284,7 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
           )}
        </div>
        
-       <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+       <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
           {screen === 'RESULT' && resultSummary && (
              <div className="md:col-span-2 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-600 p-6 flex flex-col md:flex-row items-center justify-between gap-4">
                 <div className="text-center md:text-left">
@@ -309,24 +309,34 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
           )}
 
           {passage && (
-             <div className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 h-max sticky top-20">
-                <h3 className="font-black uppercase mb-4 border-b-2 border-zinc-200 pb-2">Passage</h3>
-                <div className="whitespace-pre-wrap font-serif text-sm leading-relaxed">{passage}</div>
+             <div className="bg-orange-50/50 dark:bg-amber-950/20 shadow-sm dark:shadow-md border-2 border-orange-200/50 dark:border-amber-900/40 p-4 h-max max-h-[50vh] md:sticky md:top-20 md:max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg rounded-tl-sm rounded-br-sm relative overscroll-none block">
+                <div className="absolute top-0 right-0 p-2 opacity-10 blur-sm pointer-events-none w-full h-full overflow-hidden">
+                   <div className="text-9xl rotate-[-20deg] text-orange-900 leading-none" style={{ position: 'absolute', right: '-1rem', top: '-1rem' }}>{"\""}</div>
+                </div>
+                <h3 className="font-black uppercase mb-4 border-b-2 border-orange-200/50 dark:border-amber-900/40 pb-2 text-orange-800 dark:text-orange-200 relative z-10 flex justify-between items-center">
+                   <span>Reading Comprehension</span>
+                   <span className="text-[10px] bg-orange-200/50 text-orange-800 py-1 px-2 rounded font-bold tracking-widest shrink-0">Passage</span>
+                </h3>
+                <div className="whitespace-pre-wrap font-serif text-[15px] leading-relaxed text-left sm:text-justify relative z-10 text-zinc-800 dark:text-zinc-200">{passage}</div>
              </div>
           )}
 
-          <div className={passage ? "md:col-span-1" : "md:col-span-2"}>
+          <div className={`${passage ? "md:col-span-1" : "md:col-span-2"} flex flex-col gap-6`}>
              {questions.map((q: any, i: number) => {
-               const qText = (lang === 'bn' && q.question_bn) ? q.question_bn : q.question_en;
-               const opts = (lang === 'bn' && q.options_bn && q.options_bn.length) ? q.options_bn : q.options_en;
+               const qText = (lang === 'bn' && q.question_bn) ? q.question_bn : (q.question_en || q.question || 'Question ?');
+               const opts = (lang === 'bn' && q.options_bn && q.options_bn.length) ? q.options_bn : (q.options_en || q.options || []);
 
                return (
-                 <div key={i} className="mb-6 bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)]">
-                    <h4 className="font-bold text-lg mb-4 whitespace-pre-wrap leading-relaxed">Q{i+1}. {qText}</h4>
+                 <div key={i} className="bg-white dark:bg-zinc-900 border-x border-y border-zinc-200 dark:border-zinc-800 p-6 shadow-sm rounded-xl relative overflow-hidden transition-all duration-300 hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50 group">
+                    <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-blue-400 to-indigo-600 opacity-50"></div>
+                    <div className="flex gap-3 items-start mb-5 overflow-x-auto">
+                       <span className="shrink-0 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-black w-8 h-8 flex items-center justify-center rounded-full text-sm shadow-inner shadow-blue-500/20">{i+1}</span>
+                       <h4 className="font-bold text-lg whitespace-pre-wrap leading-relaxed text-left sm:text-justify flex-1 text-zinc-800 dark:text-zinc-100 mt-1 min-w-0">{qText}</h4>
+                    </div>
                     {q.sentences && (
-                       <div className="mb-4 space-y-2 bg-blue-50 dark:bg-blue-950 p-4 border border-blue-200 dark:border-blue-900">
+                       <div className="mb-5 space-y-2 bg-blue-50/50 dark:bg-indigo-950/20 p-4 border border-blue-100 dark:border-indigo-900/50 rounded-lg text-left sm:text-justify text-zinc-700 dark:text-zinc-300 ml-11 overflow-x-auto">
                           {Object.keys(q.sentences).map(k => (
-                            <div key={k} className="flex gap-2 text-sm"><strong className="text-blue-700 dark:text-blue-300">{k}.</strong> <span>{q.sentences[k]}</span></div>
+                             <div key={k} className="flex gap-2 text-sm min-w-max sm:min-w-0"><strong className="text-blue-700 dark:text-blue-300">{k}.</strong> <span className="whitespace-pre-wrap">{q.sentences[k]}</span></div>
                           ))}
                        </div>
                     )}

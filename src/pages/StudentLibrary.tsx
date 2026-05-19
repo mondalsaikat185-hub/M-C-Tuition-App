@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, getDocs, where, doc, getDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { PageHeader } from './Pages';
-import { Loader2, Eye, FileText, FileDown, BookOpen, Folder, ChevronRight, Clock, Search, FolderOpen } from 'lucide-react';
+import { Loader2, Eye, FileText, FileDown, BookOpen, Folder, ChevronRight, Clock, Search, FolderOpen, PenTool } from 'lucide-react';
 import { useAuth } from '../components/AuthProvider';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
 import { LibraryItem } from './AdminLibrary';
@@ -54,6 +54,7 @@ export function StudentLibrary() {
   const [allAssigns, setAllAssigns] = useState<any[]>([]);
   const [libraryCache, setLibraryCache] = useState<Map<string, LibraryItem>>(new Map());
   const [fetchedFolders, setFetchedFolders] = useState<Set<string>>(new Set());
+  const [libraryMode, setLibraryMode] = useState<'EXAM' | 'NOTE' | null>(null);
 
   useEffect(() => {
     if (!user?.batchId) {
@@ -320,12 +321,6 @@ export function StudentLibrary() {
             return;
          }
 
-         if (item.type === 'exam' && item.contentUrl && (item.contentUrl.startsWith('http://') || item.contentUrl.startsWith('https://'))) {
-            // Check if it's an external link exam (not a google drive PDF link since it's an exam)
-            window.open(item.contentUrl, '_blank');
-            return;
-         }
-
          if (!user || !(user as any).batchId) {
             alert("প্রথমে একটি batch-এ যোগ দিন (Join a batch first)");
             return;
@@ -450,17 +445,43 @@ export function StudentLibrary() {
   };
 
   const breadcrumbs = getBreadcrumbs();
+  const isFolderVisible = (folder: LibraryItem, mode: 'EXAM' | 'NOTE'): boolean => {
+     const checkContents = (parentId: string): boolean => {
+         const children = items.filter(i => i.parentId === parentId);
+         for (const child of children) {
+             if (!child.isFolder) {
+                 if (mode === 'EXAM' && child.type === 'exam') return true;
+                 if (mode === 'NOTE' && child.type !== 'exam') return true;
+             } else {
+                 if (checkContents(child.id)) return true;
+             }
+         }
+         return false;
+     };
+     
+     const hasMatchingContent = checkContents(folder.id);
+     if (!hasMatchingContent) {
+         if (mode === 'EXAM' && (folder.title.toLowerCase().includes('exam') || folder.title.toLowerCase().includes('test'))) return true;
+         if (mode === 'NOTE' && !(folder.title.toLowerCase().includes('exam') || folder.title.toLowerCase().includes('test'))) return true;
+         return false;
+     }
+     return true;
+  };
+
   const currentItems = items.filter(i => 
     searchQuery 
-     ? i.title.toLowerCase().includes(searchQuery.toLowerCase()) 
-     : (i.parentId || null) === currentFolderId
+     ? i.title.toLowerCase().includes(searchQuery.toLowerCase()) && (libraryMode === 'NOTE' ? i.type !== 'exam' : i.type === 'exam')
+     : (i.parentId || null) === currentFolderId && (
+         (i.isFolder && isFolderVisible(i, libraryMode as 'EXAM' | 'NOTE')) || 
+         (!i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam'))
+       )
   );
   const folders = currentItems.filter(i => i.isFolder).sort((a,b) => a.title.localeCompare(b.title));
   const files = currentItems.filter(i => !i.isFolder).sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
 
   const allFilesSorted = searchQuery 
     ? files 
-    : items.filter(i => !i.isFolder).sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+    : items.filter(i => !i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam')).sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
 
   const formatDate = (timestamp: any) => {
      if (!timestamp) return 'No date';
@@ -475,8 +496,31 @@ export function StudentLibrary() {
      if (currentFolderId) {
         const folder = items.find(i => i.id === currentFolderId);
         setCurrentFolderId(folder?.parentId || null);
+     } else {
+        setLibraryMode(null);
      }
   };
+
+  if (!libraryMode) {
+      return (
+         <div className="p-4 sm:p-6 max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[70vh] w-full text-center">
+             <h1 className="text-3xl font-black mb-8 uppercase text-zinc-900 dark:text-zinc-100">Welcome to Library</h1>
+             <p className="text-zinc-600 dark:text-zinc-400 font-bold mb-10">What would you like to access today?</p>
+             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full max-w-2xl px-4">
+                 <button onClick={() => setLibraryMode('NOTE')} className="flex flex-col items-center gap-4 bg-zinc-50 dark:bg-zinc-900/50 border-4 border-zinc-900 dark:border-zinc-100 p-8 hover:-translate-y-2 transition-transform shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] group">
+                    <div className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 p-6 rounded-full group-hover:scale-110 transition-transform"><BookOpen className="w-10 h-10" /></div>
+                    <h2 className="text-2xl font-black uppercase text-zinc-900 dark:text-zinc-100">Study Materials</h2>
+                    <p className="text-zinc-700 dark:text-zinc-400 font-medium">Access PDF notes, assignments & study guides</p>
+                 </button>
+                 <button onClick={() => setLibraryMode('EXAM')} className="flex flex-col items-center gap-4 bg-blue-50 dark:bg-blue-900/20 border-4 border-blue-600 p-8 hover:-translate-y-2 transition-transform shadow-[8px_8px_0px_0px_rgba(37,99,235,1)] group">
+                    <div className="bg-blue-600 text-white p-6 rounded-full group-hover:scale-110 transition-transform"><PenTool className="w-10 h-10" /></div>
+                    <h2 className="text-2xl font-black uppercase text-blue-900 dark:text-blue-100">Take an Exam</h2>
+                    <p className="text-blue-700 dark:text-blue-300 font-medium">Participate in live exams or past mock tests</p>
+                 </button>
+             </div>
+         </div>
+      );
+  }
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
@@ -699,11 +743,15 @@ function FileCard({ item, onPreview, formatDate, showPath, items, onDownloadChun
                  {downloadingId === item.id ? 'Processing...' : 'Download PDF'}
                </button>
            )}
-           {item.type === 'exam' && (
+           {item.type === 'exam' && item.examType === 'Online Link' && item.contentUrl ? (
+              <a href={item.contentUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 bg-blue-100 text-blue-900 px-4 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold text-xs hover:-translate-y-0.5 transition-transform whitespace-nowrap shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)]">
+                 <BookOpen className="w-3.5 h-3.5" /> Take Exam
+              </a>
+           ) : item.type === 'exam' ? (
               <button onClick={onPreview} className="flex items-center gap-1 bg-blue-100 text-blue-900 px-4 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold text-xs hover:-translate-y-0.5 transition-transform whitespace-nowrap shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)]">
                  <BookOpen className="w-3.5 h-3.5" /> Take Exam
               </button>
-           )}
+           ) : null}
          </div>
       </div>
    );
