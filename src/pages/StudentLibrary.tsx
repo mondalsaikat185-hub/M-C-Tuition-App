@@ -199,51 +199,47 @@ export function StudentLibrary() {
   const ORACLE_API_KEY = 'tuition-secret-2026-change-this';
 
   const handleDownloadUrl = async (item: LibraryItem) => {
-     if (!item.contentUrl || !item.id) return;
-     
-     try {
-        setDownloadingId(item.id);
-        
-        const fileIdMatch = item.contentUrl.match(/[-\w]{25,}/);
-        const fileId = fileIdMatch ? fileIdMatch[0] : null;
-        if (!fileId) { alert('Invalid file link.'); return; }
+    try {
+      setDownloadingId(item.id);
 
-        const studentName = user?.fullName || user?.displayName || user?.email || 'Student';
-        const phone = user?.phone || '0000000000';
-        const fileName = `${item.title || 'document'}.pdf`;
+      const fileIdMatch = item.contentUrl?.match(/[-\w]{25,}/);
+      const fileId = fileIdMatch ? fileIdMatch[0] : null;
+      if (!fileId) { alert('Invalid file link.'); return; }
 
-        // Small notification to user
-        alert(`Downloading... Password will be your phone number: ${phone}`);
+      const studentName = (user as any)?.fullName || user?.displayName || user?.email || 'Student';
+      const phone = (user as any)?.phone || '0000000000';
+      const fileName = `${item.title || 'document'}.pdf`;
+      const password = phone;
 
-        const response = await fetch(`${ORACLE_SERVER_URL}/download`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: ORACLE_API_KEY, fileId, name: studentName, phone, fileName })
-        });
+      const response = await fetch(`${ORACLE_SERVER_URL}/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          key: ORACLE_API_KEY, 
+          fileId, 
+          name: studentName, 
+          phone, 
+          fileName 
+        })
+      });
 
-        if (!response.ok) { 
-           alert('Download failed. Please try again.'); 
-           return; 
-        }
+      if (!response.ok) { alert('Download failed. Please try again.'); return; }
 
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.click();
-        URL.revokeObjectURL(url);
-     } catch (e: any) {
-        console.error("Direct download from Oracle PDF server failed.", e);
-        const fallback = window.confirm(
-            "ডাউনলোড করতে সমস্যা হচ্ছে।\n\nআপনি কি সরাসরি গুগল ড্রাইভ লিংক ব্যবহার করে পিডিএফ-টি খুলতে চান?"
-        );
-        if (fallback && item.contentUrl) {
-            window.open(item.contentUrl, '_blank');
-        }
-     } finally {
-        setDownloadingId(null);
-     }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+      
+      alert(`✓ Downloaded!\nPassword: ${password}\n(আপনার ফোন নম্বর)`);
+    } catch (error) {
+      alert('Download error. Check your connection.');
+      console.error(error);
+    } finally {
+      if (item.id) setDownloadingId(null);
+    }
   };
 
   const handleDownloadChunked = async (item: LibraryItem) => {
