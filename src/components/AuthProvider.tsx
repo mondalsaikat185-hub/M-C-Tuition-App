@@ -33,6 +33,10 @@ export interface AppUser {
   batchId?: string;
   isProfileComplete?: boolean;
   profilePhotoUrl?: string;
+  monthlyFee?: number | null;
+  pendingMonths?: number | null;
+  showPaymentNudge?: boolean;
+  exemptReason?: string | null;
 }
 
 interface AuthContextType {

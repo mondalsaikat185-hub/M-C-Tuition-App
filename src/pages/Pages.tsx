@@ -1717,17 +1717,9 @@ export function StudentPayments() {
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
   const [settings, setSettings] = useState({ adminUpiId: '', enablePaymentSystem: true });
-  const [userProfile, setUserProfile] = useState<any>(null);
 
-  useEffect(() => {
-    if (!user) return;
-    getDoc(doc(db, 'users', user.uid)).then(snap => {
-      if (snap.exists()) setUserProfile(snap.data());
-    }).catch(console.error);
-  }, [user]);
-
-  const monthlyFeeAmount = Number(userProfile?.monthlyFee) || 0;
-  const isFeeWaived = userProfile?.monthlyFee === 0;
+  const monthlyFeeAmount = Number(user?.monthlyFee) || 0;
+  const isFeeWaived = user?.monthlyFee === 0;
   
   const calculatedAmount = selectedMonths.length > 0 ? selectedMonths.length * (monthlyFeeAmount > 0 ? monthlyFeeAmount : 500) : (monthlyFeeAmount > 0 ? monthlyFeeAmount : 500);
 

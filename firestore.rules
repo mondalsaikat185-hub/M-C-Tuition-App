@@ -36,8 +36,8 @@ service cloud.firestore {
       allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming()) &&
                     (isAdmin() || (userId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(
                       ['updatedAt', 'fullName', 'address', 'dob', 'joinDate', 'phone',
-                       'photoURL', 'profilePhotoUrl', 'isProfileComplete', 'batchId', 'activeDevices']
-                    )));
+                       'photoURL', 'profilePhotoUrl', 'isProfileComplete', 'batchId', 'activeDevices', 'status']
+                    ) && (incoming().status == 'pending' || incoming().status == existing().status)));
       allow delete: if isAdmin();
     }
 

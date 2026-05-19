@@ -9,13 +9,24 @@ import { Loader2 } from 'lucide-react';
 export function ProfileSetup() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [fullName, setFullName] = useState(user?.displayName || '');
+  const [fullName, setFullName] = useState(user?.displayName || user?.fullName || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [address, setAddress] = useState(user?.address || '');
   const [joinDate, setJoinDate] = useState(user?.joinDate || '');
   const [batchId, setBatchId] = useState(user?.batchId || '');
   const [loading, setLoading] = useState(false);
   const [batches, setBatches] = useState<{id: string, name: string}[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      setFullName(curr => curr || user.displayName || user.fullName || '');
+      setPhone(curr => curr || user.phone || '');
+      setAddress(curr => curr || user.address || '');
+      // Only set if not already set by user
+      if (!joinDate && user.joinDate) setJoinDate(user.joinDate);
+      if (!batchId && user.batchId) setBatchId(user.batchId);
+    }
+  }, [user]);
 
   useEffect(() => {
     const fetchBatches = async () => {
@@ -36,16 +47,22 @@ export function ProfileSetup() {
     e.preventDefault();
     if (!user) return;
     
-    // Strict validation
-    if (!fullName.trim() || !phone.trim() || !address.trim() || !joinDate.trim() || !batchId.trim()) {
-       alert("Please fill in all mandatory fields correctly.");
+    const missingFields = [];
+    if (!fullName.trim()) missingFields.push("Full Name");
+    if (!phone.trim()) missingFields.push("Phone Number");
+    if (!address.trim()) missingFields.push("Full Residential Address");
+    if (!joinDate.trim()) missingFields.push("Date of Joining");
+    if (!batchId.trim()) missingFields.push("Preferred Batch");
+
+    if (missingFields.length > 0) {
+       alert(`Please fill in the following mandatory fields: ${missingFields.join(", ")}`);
        return;
     }
 
     try {
       setLoading(true);
 
-      const statusUpdate = user.status === 'incomplete' ? { status: 'pending' } : {};
+      const statusUpdate = (user.status === 'incomplete' || user.status === 'rejected') ? { status: 'pending' } : {};
 
       await updateDoc(doc(db, 'users', user.uid), {
          fullName: fullName.trim(),
@@ -57,6 +74,25 @@ export function ProfileSetup() {
          ...statusUpdate,
          updatedAt: serverTimestamp()
       });
+
+      // Send notification to admin if status changed to pending
+      if (statusUpdate.status === 'pending') {
+         try {
+            const { addDoc } = await import('firebase/firestore');
+            await addDoc(collection(db, 'notifications'), {
+               title: 'New Student Enrollment Request',
+               body: `${fullName.trim()} has submitted an enrollment/re-enrollment request.`,
+               type: 'enrollment_request',
+               createdAt: serverTimestamp(),
+               senderId: user.uid,
+               readers: [] // No one has read it yet
+            });
+         } catch (notifErr) {
+            console.error("Failed to send notification to admin", notifErr);
+            // Non-critical, so we proceed
+         }
+      }
+
       navigate('/student');
     } catch (error: any) {
       alert("Error updating profile: " + String(error.message || error));
