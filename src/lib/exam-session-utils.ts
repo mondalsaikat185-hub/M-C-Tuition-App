@@ -34,19 +34,21 @@ export async function createExamSession(
     createdBy: adminUid,
   });
 
-  // Initialize attendance for today if not already existing
-  const today = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
-  const attendanceId = `${batchId}_${today}`;
-  const attendanceRef = doc(db, 'attendance', attendanceId);
-  const snap = await getDoc(attendanceRef);
-  if (!snap.exists()) {
-    await setDoc(attendanceRef, {
-      date: today,
-      batchId,
-      presentStudentIds: [],
-      examSessionId: docRef.id,
-      updatedAt: serverTimestamp(),
-    });
+  // Initialize attendance ONLY if the session requires a code (live session)
+  if (codeEnabled) {
+    const today = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+    const attendanceId = `${batchId}_${today}`;
+    const attendanceRef = doc(db, 'attendance', attendanceId);
+    const snap = await getDoc(attendanceRef);
+    if (!snap.exists()) {
+      await setDoc(attendanceRef, {
+        date: today,
+        batchId,
+        presentStudentIds: [],
+        examSessionId: docRef.id,
+        updatedAt: serverTimestamp(),
+      });
+    }
   }
 
   return { sessionId: docRef.id, accessCode };
@@ -154,6 +156,7 @@ export async function joinSessionWithoutCode(
     participantUids: arrayUnion(studentUid),
   });
 
-  await recordAttendance(batchId, studentUid, sessionId);
+  // DO NOT record attendance for non-coded sessions
+  // Only explicitly coded (live) sessions count for attendance
   return 'ok';
 }

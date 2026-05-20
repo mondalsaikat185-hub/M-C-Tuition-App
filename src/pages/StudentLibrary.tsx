@@ -245,13 +245,8 @@ export function StudentLibrary() {
       }
 
       if (isIOS) {
-        // iOS Safari does not support <a download> — it opens the blob URL as a new page.
-        // Instead, open in new tab so user can use the PDF viewer's Share → Save to Files.
         const newTab = window.open(blobUrl, '_blank');
-        if (!newTab) {
-          // Pop-up blocked — fall back to same-tab navigation
-          window.location.href = blobUrl;
-        }
+        if (!newTab) window.location.href = blobUrl;
         setTimeout(() => URL.revokeObjectURL(blobUrl), 90000);
         setDownloadMessage({
           title: '📄 PDF Opened in Browser',
@@ -261,7 +256,28 @@ export function StudentLibrary() {
         return;
       }
 
-      // Standard download: Android Chrome, desktop browsers
+      // Web Share API (Best for Android PWA / Chrome)
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+              await navigator.share({
+                  files: [file],
+                  title: fileName
+              });
+              setDownloadMessage({
+                  title: '✅ PDF Shared / Saved',
+                  body: `PDF টি সফলভাবে খোলা বা সেভ করা হয়েছে।\n\nPassword: ${password}\n(আপনার ফোন নম্বর)`,
+                  isWarning: false
+              });
+              return;
+          } catch (err: any) {
+              console.log("Share failed or user cancelled:", err);
+              if (err.name === 'AbortError') return; // User cancelled manually
+              // Fallthrough to standard download
+          }
+      }
+
+      // Standard download: fallback
       const a = document.createElement('a');
       a.href = blobUrl;
       a.download = fileName;
@@ -372,10 +388,32 @@ export function StudentLibrary() {
           return;
         }
 
-        // Download
+        // Web Share API (Best for Android PWA / Chrome)
+        const fileName = item.fileName || 'note.pdf';
+        const file = new File([blob], fileName, { type: 'application/pdf' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+                await navigator.share({
+                    files: [file],
+                    title: fileName
+                });
+                setDownloadMessage({
+                    title: '✅ PDF Shared / Saved',
+                    body: `PDF টি সফলভাবে খোলা বা সেভ করা হয়েছে।\n\nPassword: ${password}\n(আপনার ফোন নম্বর)`,
+                    isWarning: false
+                });
+                return;
+            } catch (err: any) {
+                console.log("Share failed or user cancelled:", err);
+                if (err.name === 'AbortError') return; // User cancelled manually
+                // Fallthrough to standard download
+            }
+        }
+
+        // Download fallback
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = item.fileName || 'note.pdf';
+        link.download = fileName;
         document.body.appendChild(link); 
         link.click(); 
         document.body.removeChild(link); 
