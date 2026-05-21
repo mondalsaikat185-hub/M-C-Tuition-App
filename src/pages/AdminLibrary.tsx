@@ -8,8 +8,6 @@ import { Loader2, Plus, Eye, Share2, Trash2, FileText, FileDown, BookOpen, Folde
 import { useAuth } from '../components/AuthProvider';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
 
-import { encryptPDF } from '@pdfsmaller/pdf-encrypt';
-
 export interface LibraryItem {
   id: string;
   title: string;
@@ -102,6 +100,7 @@ export function AdminLibrary() {
   const [pdfPassword, setPdfPassword] = useState('');
   
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [folderName, setFolderName] = useState('');
   
   const [editItemId, setEditItemId] = useState<string | null>(null);
@@ -261,6 +260,11 @@ export function AdminLibrary() {
             }
           } else {
              // fallback to function eval
+             if (!window.confirm("Could not securely extract data. The system must execute the file as JavaScript to parse it. Only proceed if you trust this file completely. Do you want to proceed?")) {
+                 setAutoExtractMsg('Extraction aborted for security.');
+                 return;
+             }
+
              const fn = new Function(`
                const dummyNode = new Proxy({}, {
                  get: (target, prop) => {
@@ -304,8 +308,10 @@ export function AdminLibrary() {
      if (!folderName.trim()) return;
      try {
        setSubmitting(true);
+       const name = folderName.trim();
+       
        await addDoc(collection(db, 'library'), {
-          title: folderName.trim(),
+          title: name,
           isFolder: true,
           type: 'folder',
           parentId: currentFolderId || null,
@@ -313,6 +319,7 @@ export function AdminLibrary() {
           createdBy: user?.uid,
           isActive: true
        });
+
        setIsFolderModalOpen(false);
        setFolderName('');
      } catch (err: any) {
@@ -350,15 +357,12 @@ export function AdminLibrary() {
 
         if (itemType === 'note' && !file && !linkUrl.trim()) {
            alert("Please provide a valid document or a link.");
-           setSubmitting(false);
            return;
         } else if (itemType === 'exam' && examType !== 'Online Link' && !quizData && !contentUrl) {
            alert("Please paste the Quiz JSON, upload a file containing questions, or provide an External Exam Link.");
-           setSubmitting(false);
            return;
         } else if (itemType === 'exam' && examType === 'Online Link' && !contentUrl) {
            alert("Please provide the External Exam Link.");
-           setSubmitting(false);
            return;
         }
 
@@ -383,10 +387,11 @@ export function AdminLibrary() {
            payload.marksCorrect = marksCorrect;
            payload.marksWrong = marksWrong;
            payload.allowMultipleAttempts = allowMultipleAttempts;
+           
            await addDoc(collection(db, 'library'), payload);
+           
            setIsUploadModalOpen(false);
            resetForm();
-           setSubmitting(false);
            return;
         }
 
@@ -394,17 +399,22 @@ export function AdminLibrary() {
         if (itemType === 'note' && file) {
            payload.fileName = file.name;
            
+           setUploadProgress('Preparing file...');
+
            const reader = new FileReader();
            reader.onload = async (event) => {
               try {
                 let finalBytesStr = (event.target?.result as string).split(',')[1];
                 if (pdfPassword.trim()) {
+                     setUploadProgress('Encrypting PDF (this may take a moment)...');
+                     await new Promise(r => setTimeout(r, 50));
                      const byteCharacters = atob(finalBytesStr);
                      const byteNumbers = new Array(byteCharacters.length);
                      for (let i = 0; i < byteCharacters.length; i++) {
                         byteNumbers[i] = byteCharacters.charCodeAt(i);
                      }
                      const byteArray = new Uint8Array(byteNumbers);
+                     const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt');
                      const encryptedBytes = await encryptPDF(byteArray, pdfPassword.trim());
                      let binary = '';
                      for (let i = 0; i < encryptedBytes.byteLength; i++) {
@@ -420,43 +430,55 @@ export function AdminLibrary() {
                 payload.isChunked = true;
                 payload.chunkCount = numChunks;
                 
-                const docRef = await addDoc(collection(db, 'library'), payload);
+                const docRef = doc(collection(db, 'library'));
                 
-                // Write chunks in parallel
-                const chunkPromises = Array.from({ length: numChunks }, (_, i) => {
-                   const chunkData = base64String.substring(i * chunkSize, (i + 1) * chunkSize);
-                   return setDoc(doc(db, 'libraryChunks', `${docRef.id}_${i}`), {
-                      libraryId: docRef.id,
-                      chunkIndex: i,
-                      data: chunkData
-                   });
-                });
-                await Promise.all(chunkPromises);
+                for (let i = 0; i < numChunks; i += 5) {
+                   const batchPromises = [];
+                   for (let j = i; j < i + 5 && j < numChunks; j++) {
+                      const chunkData = base64String.substring(j * chunkSize, (j + 1) * chunkSize);
+                      batchPromises.push(setDoc(doc(db, 'libraryChunks', `${docRef.id}_${j}`), {
+                         libraryId: docRef.id,
+                         chunkIndex: j,
+                         data: chunkData
+                      }));
+                   }
+                   setUploadProgress(`Uploading parts... ${Math.min(i + 5, numChunks)} of ${numChunks}`);
+                   await Promise.all(batchPromises);
+                }
                 
+                setUploadProgress('Finalizing upload...');
+                await setDoc(docRef, payload);
+
                 setIsUploadModalOpen(false);
                 resetForm();
-                setSubmitting(false);
+                setUploadProgress('');
               } catch (err: any) {
                  handleFirestoreError(err, OperationType.CREATE, 'libraryChunks');
+                 setUploadProgress('');
+              } finally {
                  setSubmitting(false);
               }
            };
            reader.onerror = () => {
               alert("Failed to read file");
+              setUploadProgress('');
               setSubmitting(false);
            }
            reader.readAsDataURL(file);
+           return; // Do not unset submitting yet, wait for reader
         } else if (itemType === 'note' && linkUrl.trim()) {
            payload.contentUrl = linkUrl.trim();
            await addDoc(collection(db, 'library'), payload);
            setIsUploadModalOpen(false);
            resetForm();
-           setSubmitting(false);
         }
 
      } catch (err: any) {
         handleFirestoreError(err, OperationType.CREATE, 'library');
-        setSubmitting(false);
+     } finally {
+        if (!file) {
+           setSubmitting(false);
+        }
      }
   };
 
@@ -523,7 +545,7 @@ export function AdminLibrary() {
        }
        await commitBatch();
        
-       fetchAssignments();
+       fetchAssignments().catch(err => console.error(err));
        setDeleteItemId(null);
      } catch (err: any) {
        console.error(err);
@@ -619,7 +641,7 @@ export function AdminLibrary() {
 
         await batchFn.commit();
         setIsShareModalOpen(false);
-        fetchAssignments();
+        fetchAssignments().catch(err => console.error(err));
      } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, 'batchAssignments');
      } finally {
@@ -1080,7 +1102,12 @@ export function AdminLibrary() {
                      </div>
                   )}
 
-                  <div className="pt-4 flex justify-end">
+                  <div className="pt-4 flex justify-between items-center">
+                     {submitting && uploadProgress ? (
+                        <div className="text-sm font-bold text-zinc-600 dark:text-zinc-400">
+                           {uploadProgress}
+                        </div>
+                     ) : <div />}
                      <button type="submit" disabled={submitting} className="bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900 font-black uppercase tracking-wide border-2 border-zinc-900 dark:border-zinc-100 px-6 py-3 shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] hover:-translate-y-0.5 transition-transform flex items-center gap-2 disabled:opacity-50">
                         {submitting && <Loader2 className="w-4 h-4 animate-spin" />} Save to Library
                      </button>

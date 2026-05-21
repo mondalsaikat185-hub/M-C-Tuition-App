@@ -34,7 +34,6 @@ export function AdminStudents() {
   const [students, setStudents] = useState<AppUser[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [studentAbsentCount, setStudentAbsentCount] = useState<Record<string, number>>({});
-  const [studentMarks, setStudentMarks] = useState<Record<string, {marks: string, examTitle: string}[]>>({});
   const [loading, setLoading] = useState(true);
   const [confirmDeleteStudentId, setConfirmDeleteStudentId] = useState<string | null>(null);
 
@@ -114,19 +113,7 @@ export function AdminStudents() {
 
     const fetchMarksAndAbsent = async () => {
       try {
-        const newStudentMarks: Record<string, {marks: string, examTitle: string}[]> = {};
         const newAbsentCount: Record<string, number> = {};
-
-        // Query all results in last X days or simply all relevant results?
-        // We'll fetch results for these students. Let's optimize by fetching all result documents and matching them.
-        // For absence count, we need 3 consecutive absences. A simple way:
-        const resultsSnap = await getDocs(collection(db, 'results'));
-        const allResults: any[] = [];
-        resultsSnap.forEach(r => allResults.push({ id: r.id, ...r.data() }));
-
-        const threeDaysAgo = new Date();
-        threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-        const threeDaysAgoMs = threeDaysAgo.getTime();
 
         students.forEach(s => {
           newAbsentCount[s.uid] = 0;
@@ -144,21 +131,6 @@ export function AdminStudents() {
           newAbsentCount[s.uid] = recentAbsences;
         });
 
-        // Calculate marks by date
-        // results have `createdAt` but attendance has `date` (YYYY-MM-DD).
-        // Let's map results to date string.
-        allResults.forEach(r => {
-           if (r.createdAt && r.studentId) {
-              const rDate = r.createdAt.toDate();
-              const dateStr = rDate.toISOString().split('T')[0];
-              const key = `${r.studentId}_${dateStr}`;
-              if (!newStudentMarks[key]) newStudentMarks[key] = [];
-              const scoreText = r.score !== undefined && r.totalPossible !== undefined ? `${r.score}/${r.totalPossible}` : String(r.score);
-              newStudentMarks[key].push({ marks: scoreText, examTitle: r.examTitle || 'Exam' });
-           }
-        });
-
-        setStudentMarks(newStudentMarks);
         setStudentAbsentCount(newAbsentCount);
       } catch (err) {
         console.error("fetchMarksAndAbsent error", err);
@@ -457,23 +429,10 @@ export function AdminStudents() {
                               {student.fullName || student.email}
                             </td>
                             {filteredRecords.map((r) => {
-                              const marksList = studentMarks[`${student.uid}_${r.date}`];
                               return (
                                 <td key={r.date} className="border-r border-b border-zinc-200 dark:border-zinc-700 px-3 py-2 text-center align-middle">
                                   <div className="flex flex-col items-center justify-center gap-1">
                                     <span className="text-xl leading-none">{r.presentStudentIds.includes(student.uid) ? '✅' : '❌'}</span>
-                                    {marksList && marksList.length > 0 ? (
-                                      marksList.map((m, idx) => (
-                                          <span key={idx} className="flex flex-col items-center mt-1">
-                                            <span className="text-[8px] bg-zinc-800 text-white px-1 py-0.5 rounded-sm uppercase overflow-hidden text-ellipsis whitespace-nowrap max-w-[90px]">{m.examTitle}</span>
-                                            <span className="text-[10px] leading-none bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 font-black px-1.5 py-1 uppercase tracking-wide border border-blue-300 dark:border-blue-700 whitespace-nowrap shadow-[1px_1px_0px_0px_rgba(0,0,0,0.1)] mt-0.5">
-                                              Score: {m.marks}
-                                            </span>
-                                          </span>
-                                      ))
-                                    ) : (
-                                      <span className="text-[10px] leading-none opacity-0 select-none">No exams</span>
-                                    )}
                                   </div>
                                 </td>
                               );
@@ -673,6 +632,10 @@ export function AdminBatches() {
   const [schedule, setSchedule] = useState('');
   const [confirmDeleteBatchId, setConfirmDeleteBatchId] = useState<string | null>(null);
 
+  const [editingBatch, setEditingBatch] = useState<Batch | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editSchedule, setEditSchedule] = useState('');
+
   const fetchBatches = async () => {
     try {
       const querySnapshot = await getDocs(collection(db, 'batches'));
@@ -711,32 +674,54 @@ export function AdminBatches() {
     }
   };
 
+  const handleEditSave = async () => {
+    if (!editingBatch || !editName || !editSchedule) return;
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, 'batches', editingBatch.id), {
+        name: editName.trim(),
+        schedule: editSchedule.trim()
+      });
+      await fetchBatches();
+      setEditingBatch(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'batches');
+      setLoading(false);
+    }
+  };
+
   const handleDeleteBatch = async (id: string) => {
     try {
       setLoading(true);
+      const batchesFn: ReturnType<typeof writeBatch>[] = [];
+      let currentBatch = writeBatch(db);
+      let opCount = 0;
 
-      const batchFn = writeBatch(db);
+      const addOp = (op: (b: ReturnType<typeof writeBatch>) => void) => {
+        if (opCount >= 490) {
+          batchesFn.push(currentBatch);
+          currentBatch = writeBatch(db);
+          opCount = 0;
+        }
+        op(currentBatch);
+        opCount++;
+      };
 
-      // detach users
-      const usersSnap = await getDocs(query(collection(db, 'users'), where('batchId', '==', id)));
-      usersSnap.forEach(d => batchFn.update(d.ref, { batchId: null }));
+      const [usersSnap, notesSnap, examsSnap, assignsSnap] = await Promise.all([
+        getDocs(query(collection(db, 'users'), where('batchId', '==', id))),
+        getDocs(query(collection(db, 'notes'), where('batchId', '==', id))),
+        getDocs(query(collection(db, 'exams'), where('batchId', '==', id))),
+        getDocs(query(collection(db, 'batchAssignments'), where('batchId', '==', id))),
+      ]);
 
-      // delete notes
-      const notesSnap = await getDocs(query(collection(db, 'notes'), where('batchId', '==', id)));
-      notesSnap.forEach(d => batchFn.delete(d.ref));
+      usersSnap.forEach(d => addOp(b => b.update(d.ref, { batchId: null })));
+      notesSnap.forEach(d => addOp(b => b.delete(d.ref)));
+      examsSnap.forEach(d => addOp(b => b.delete(d.ref)));
+      assignsSnap.forEach(d => addOp(b => b.delete(d.ref)));
 
-      // delete exams
-      const examsSnap = await getDocs(query(collection(db, 'exams'), where('batchId', '==', id)));
-      examsSnap.forEach(d => batchFn.delete(d.ref));
+      batchesFn.push(currentBatch);
+      for (const b of batchesFn) await b.commit();
 
-      // delete assignments
-      const assignsSnap = await getDocs(query(collection(db, 'batchAssignments'), where('batchId', '==', id)));
-      assignsSnap.forEach(d => batchFn.delete(d.ref));
-
-      // commit cascaded items
-      await batchFn.commit();
-
-      // finally delete batch
       await deleteDoc(doc(db, 'batches', id));
       await fetchBatches();
     } catch (error) {
@@ -807,266 +792,43 @@ export function AdminBatches() {
                   </tr>
                 )}
                 {batches.map((batch) => (
-                  <tr key={batch.id} className="border-b border-zinc-200 dark:border-zinc-800">
-                    <td className="p-2 font-bold">{batch.name}</td>
-                    <td className="p-2 text-sm">{batch.schedule}</td>
-                    <td className="p-2 flex justify-end gap-2 items-center">
-                       <button onClick={() => {
-                           const newName = window.prompt("New Name:", batch.name);
-                           if (!newName) return;
-                           const newSchedule = window.prompt("New Schedule:", batch.schedule);
-                           if (!newSchedule) return;
-                           setLoading(true);
-                           updateDoc(doc(db, 'batches', batch.id), { name: newName.trim(), schedule: newSchedule.trim() })
-                             .then(fetchBatches)
-                             .catch(err => {
-                                handleFirestoreError(err, OperationType.UPDATE, 'batches');
-                                setLoading(false);
-                             });
-                       }} className="p-1 px-3 bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200 dark:border-blue-700 font-bold uppercase text-[10px]">
-                          Edit
-                       </button>
-                      {confirmDeleteBatchId === batch.id ? (
-                        <div className="flex gap-1">
-                          <button onClick={() => { handleDeleteBatch(batch.id); setConfirmDeleteBatchId(null); }} className="p-1 px-3 bg-red-600 text-white font-bold uppercase text-[10px]">Yes</button>
-                          <button onClick={() => setConfirmDeleteBatchId(null)} className="p-1 px-3 bg-zinc-200 text-black font-bold uppercase text-[10px]">No</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => setConfirmDeleteBatchId(batch.id)} className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900 rounded">
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export interface Note {
-  id: string;
-  title: string;
-  contentUrl: string;
-  fileName?: string;
-  trackingId?: string;
-  batchId: string;
-  createdAt?: any;
-  isChunked?: boolean;
-  chunkCount?: number;
-  localUrl?: string; // used for chunked blob URLs
-}
-
-export function AdminNotes() {
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [title, setTitle] = useState('');
-  const [contentUrl, setContentUrl] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [batchId, setBatchId] = useState('');
-  const [confirmDeleteNoteId, setConfirmDeleteNoteId] = useState<string | null>(null);
-
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [notesSnap, batchesSnap] = await Promise.all([
-        getDocs(collection(db, 'notes')),
-        getDocs(collection(db, 'batches'))
-      ]);
-      
-      const notesData: Note[] = [];
-      notesSnap.forEach((doc) => {
-        notesData.push({ id: doc.id, ...doc.data() } as Note);
-      });
-      setNotes(notesData);
-
-      const batchesData: Batch[] = [];
-      batchesSnap.forEach((doc) => {
-        batchesData.push({ id: doc.id, ...doc.data() } as Batch);
-      });
-      setBatches(batchesData);
-      
-      if (batchesData.length > 0 && !batchId) {
-        setBatchId(batchesData[0].id);
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'notes / batches');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const generateTrackingId = (filename: string) => {
-    const base = filename.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "-").toUpperCase().slice(0, 15);
-    const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-    return `${base}-${randomSuffix}`;
-  };
-
-  const handleAddNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !batchId || (!contentUrl && !file)) return;
-    try {
-      setLoading(true);
-      
-      let finalUrl = contentUrl;
-      let trackingId = '';
-      let fileName = '';
-
-      if (file) {
-        if (file.size > 800000) {
-           alert("File is too large for simple notes. Please use the Central Library for larger files.");
-           setLoading(false);
-           return;
-        }
-        finalUrl = await new Promise<string>((resolve, reject) => {
-           const reader = new FileReader();
-           reader.onload = (e) => resolve(e.target?.result as string);
-           reader.onerror = (e) => reject(e);
-           reader.readAsDataURL(file);
-        });
-        fileName = file.name;
-        trackingId = generateTrackingId(file.name);
-      }
-
-      await addDoc(collection(db, 'notes'), {
-        title,
-        contentUrl: finalUrl,
-        batchId,
-        trackingId,
-        fileName,
-        createdAt: serverTimestamp()
-      });
-      setTitle('');
-      setContentUrl('');
-      setFile(null);
-      await fetchData();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'notes');
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteNote = async (id: string) => {
-    try {
-      setLoading(true);
-      await deleteDoc(doc(db, 'notes', id));
-      await fetchData();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `notes/${id}`);
-      setLoading(false);
-    }
-  };
-
-  const getBatchName = (id: string) => batches.find(b => b.id === id)?.name || 'Unknown Batch';
-
-  return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
-      <PageHeader title="Central Library" backTo="/admin" />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-1 bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)]">
-          <h3 className="font-black uppercase mb-4">Upload Note</h3>
-          <form onSubmit={handleAddNote} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-bold uppercase mb-1">Select Batch</label>
-              <select
-                value={batchId}
-                onChange={e => setBatchId(e.target.value)}
-                className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none"
-              >
-                {batches.map(b => (
-                  <option key={b.id} value={b.id} className="text-zinc-900">{b.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold uppercase mb-1">Note Title</label>
-              <input 
-                type="text" 
-                value={title} 
-                onChange={e => setTitle(e.target.value)} 
-                className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none"
-                placeholder="e.g. Chapter 1: Real Numbers"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold uppercase mb-1">Upload PDF</label>
-              <input 
-                type="file" 
-                accept="application/pdf"
-                onChange={e => setFile(e.target.files?.[0] || null)}
-                className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none text-xs"
-              />
-            </div>
-            <div className="text-center text-xs font-bold uppercase opacity-50 border-t-2 border-b-2 border-dashed border-zinc-900 dark:border-zinc-100 py-2 my-2">OR</div>
-            <div>
-              <label className="block text-xs font-bold uppercase mb-1">External Link</label>
-              <input 
-                type="url" 
-                value={contentUrl} 
-                onChange={e => setContentUrl(e.target.value)} 
-                className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none text-xs"
-                placeholder="Google Drive, Video Link..."
-                disabled={!!file}
-              />
-            </div>
-            <button type="submit" disabled={loading || !title || !batchId || (!contentUrl && !file)} className="mt-2 bg-orange-500 text-white font-bold uppercase text-xs px-4 py-3 flex justify-center items-center gap-2 hover:-translate-y-0.5 transition-transform border-2 border-transparent disabled:opacity-50 shadow-[4px_4px_0px_0px_rgba(234,88,12,1)]">
-              <Plus className="w-4 h-4" /> Upload Note
-            </button>
-          </form>
-        </div>
-        
-        <div className="md:col-span-2 bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] overflow-x-auto w-full">
-          <h3 className="font-black uppercase mb-4">Uploaded Notes</h3>
-          {loading ? (
-            <div className="flex justify-center p-8"><Loader2 className="animate-spin w-8 h-8 text-orange-500" /></div>
-          ) : (
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b-2 border-zinc-900 dark:border-zinc-100">
-                  <th className="p-2 font-bold uppercase text-xs">Title & Info</th>
-                  <th className="p-2 font-bold uppercase text-xs">Batch</th>
-                  <th className="p-2 font-bold uppercase text-xs">Access</th>
-                  <th className="p-2 font-bold uppercase text-xs text-right">Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {notes.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="p-4 text-center text-zinc-500 font-medium">No notes uploaded yet.</td>
-                  </tr>
-                )}
-                {notes.map((note) => (
-                  <tr key={note.id} className="border-b border-zinc-200 dark:border-zinc-800">
-                    <td className="p-2">
-                       <span className="font-bold block">{note.title}</span>
-                       <span className="text-[10px] text-zinc-500 font-mono tracking-wider">{note.trackingId || 'NO-TRACKING'} {note.fileName ? ` | ${note.fileName}` : ''}</span>
-                    </td>
-                    <td className="p-2 text-sm">{getBatchName(note.batchId)}</td>
-                    <td className="p-2">
-                       <a href={note.contentUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline text-sm font-bold uppercase">View Link</a>
-                    </td>
-                    <td className="p-2 text-right">
-                      {confirmDeleteNoteId === note.id ? (
-                        <div className="flex justify-end gap-1">
-                          <button onClick={() => { handleDeleteNote(note.id); setConfirmDeleteNoteId(null); }} className="p-1 px-3 bg-red-600 text-white font-bold uppercase text-[10px]">Yes</button>
-                          <button onClick={() => setConfirmDeleteNoteId(null)} className="p-1 px-3 bg-zinc-200 text-black font-bold uppercase text-[10px]">No</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => setConfirmDeleteNoteId(note.id)} className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900 rounded">
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                  <React.Fragment key={batch.id}>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-800">
+                      <td className="p-2 font-bold">{batch.name}</td>
+                      <td className="p-2 text-sm">{batch.schedule}</td>
+                      <td className="p-2 flex justify-end gap-2 items-center">
+                         <button onClick={() => {
+                             setEditingBatch(batch);
+                             setEditName(batch.name);
+                             setEditSchedule(batch.schedule);
+                         }} className="p-1 px-3 bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200 dark:border-blue-700 font-bold uppercase text-[10px]">
+                            Edit
+                         </button>
+                        {confirmDeleteBatchId === batch.id ? (
+                          <div className="flex gap-1">
+                            <button onClick={() => { handleDeleteBatch(batch.id); setConfirmDeleteBatchId(null); }} className="p-1 px-3 bg-red-600 text-white font-bold uppercase text-[10px]">Yes</button>
+                            <button onClick={() => setConfirmDeleteBatchId(null)} className="p-1 px-3 bg-zinc-200 text-black font-bold uppercase text-[10px]">No</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setConfirmDeleteBatchId(batch.id)} className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900 rounded">
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {editingBatch?.id === batch.id && (
+                      <tr className="border-b-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20">
+                        <td colSpan={3} className="p-4 flex flex-col sm:flex-row gap-4 items-center">
+                          <input type="text" value={editName} onChange={e => setEditName(e.target.value)} className="border-2 border-zinc-900 dark:border-zinc-100 p-2 text-sm w-full bg-white dark:bg-zinc-800" placeholder="Name" />
+                          <input type="text" value={editSchedule} onChange={e => setEditSchedule(e.target.value)} className="border-2 border-zinc-900 dark:border-zinc-100 p-2 text-sm w-full bg-white dark:bg-zinc-800" placeholder="Schedule" />
+                          <div className="flex gap-2 shrink-0">
+                            <button onClick={handleEditSave} disabled={loading} className="bg-blue-600 text-white px-4 py-2 font-bold uppercase text-xs">Save</button>
+                            <button onClick={() => setEditingBatch(null)} disabled={loading} className="bg-zinc-200 text-zinc-900 px-4 py-2 font-bold uppercase text-xs">Cancel</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -1078,6 +840,13 @@ export function AdminNotes() {
 }
 
 import { ExamType, InteractiveQuizPayload } from '../types/QuizData';
+
+export interface Note {
+  id: string;
+  title: string;
+  contentUrl?: string; // Optional link
+  createdAt?: any;
+}
 
 export interface Exam {
   id: string;

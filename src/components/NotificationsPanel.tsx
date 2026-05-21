@@ -99,6 +99,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
         setTitle('');
         setMessage('');
         setTargetBatch('all');
+        setRefreshKey(k => k + 1);
      } catch (err) {
         console.error("Failed to save notification", err);
         alert("Action failed.");

@@ -259,7 +259,7 @@ export function StudentLibrary() {
   };
 
   const ORACLE_SERVER_URL = 'https://saikat-tuition.duckdns.org';
-  const ORACLE_API_KEY = 'tuition-secret-2026-change-this';
+  const ORACLE_API_KEY = import.meta.env.VITE_ORACLE_API_KEY || 'tuition-secret-2026-change-this';
 
   const handleDownloadUrl = async (item: LibraryItem) => {
     try {
