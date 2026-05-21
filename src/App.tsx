@@ -205,10 +205,10 @@ function TopNav() {
   useEffect(() => {
     if (!user) return;
 
-    const q = query(collection(db, "notifications"), limit(100));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
+    const fetchUnread = async () => {
+      try {
+        const q = query(collection(db, "notifications"), limit(100));
+        const snap = await getDocs(q);
         let notifs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         if (user.role === "student") {
           notifs = notifs.filter(
@@ -225,13 +225,12 @@ function TopNav() {
             n.senderId !== user.uid && !(n.readers || []).includes(user.uid),
         ).length;
         setUnreadCount(unread);
-      },
-      (err) => {
+      } catch(err) {
         console.error("Notifications fetch error", err);
-      },
-    );
+      }
+    };
 
-    return () => unsub();
+    fetchUnread();
   }, [user?.uid, user?.role, (user as any)?.batchId]);
 
   const handleEditProfileOpen = () => {
@@ -250,9 +249,8 @@ function TopNav() {
         fullName: editName,
         address: editAddress,
       });
-      // The auth context might not update automatically for this specific field since it pulls from users collection.
-      // But let's assume it does via onSnapshot, or we rely on a page refresh.
-      // Actually AuthProvider uses onSnapshot. So it's real-time.
+      // Note: AuthProvider now uses getDoc (not onSnapshot). Profile changes
+      // (fullName, address) will require a page reload to be reflected in the UI.
       setShowEditProfile(false);
       window.dispatchEvent(
         new CustomEvent("show-custom-alert", {
@@ -845,10 +843,16 @@ function StudentDashboard() {
           <h2 className="text-xl font-black uppercase mb-2 text-yellow-800 dark:text-yellow-200">
             Pending Approval
           </h2>
-          <p className="text-yellow-700 dark:text-yellow-300">
+          <p className="text-yellow-700 dark:text-yellow-300 mb-4">
             Your account is created but waiting for admin approval. Please wait
             for the teacher to verify your account and assign you to a batch.
           </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-yellow-600 text-white font-black uppercase px-4 py-2 text-sm hover:-translate-y-0.5 transition-transform border-2 border-yellow-800"
+          >
+            🔄 Check Approval Status
+          </button>
         </div>
       </div>
     );
@@ -1322,6 +1326,31 @@ import { ReloadPrompt } from "./components/ReloadPrompt";
 import { InstallPrompt } from "./components/InstallPrompt";
 
 export default function App() {
+  const { quotaError } = useAuth();
+
+  if (quotaError) {
+    return (
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
+        <div className="bg-white dark:bg-zinc-900 border-4 border-red-600 p-8 max-w-md shadow-[8px_8px_0px_0px_rgba(220,38,38,1)]">
+          <h1 className="text-2xl font-black text-red-600 uppercase mb-4">Database Limit Reached</h1>
+          <p className="font-bold text-zinc-700 dark:text-zinc-300 mb-6 text-sm whitespace-pre-wrap leading-relaxed">
+            {quotaError}
+          </p>
+          <p className="text-xs font-bold text-zinc-500 mb-6">
+            Firebase free tier daily read limit has been exhausted (50,000 reads). 
+            This limit resets daily at 12:00 AM Pacific Time.
+          </p>
+          <button 
+             onClick={() => window.location.reload()}
+             className="w-full bg-red-600 text-white font-black uppercase py-3 hover:-translate-y-1 transition-transform border-2 border-red-600"
+          >
+             Reload Page
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Router>
       <ReloadPrompt />

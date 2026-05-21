@@ -19,10 +19,9 @@ export function AdminResults() {
   const [searchQuery, setSearchQuery] = useState('');
   const [examFilter, setExamFilter] = useState('');
   const [tab, setTab] = useState<'latest' | 'student' | 'exam'>('latest');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    let unsubscribe: () => void;
-
     const fetchInitialData = async () => {
       try {
         setLoading(true);
@@ -51,13 +50,13 @@ export function AdminResults() {
            q = query(collection(db, 'results'), orderBy('createdAt', 'desc'));
         }
         
-        unsubscribe = onSnapshot(q, async (qSnap) => {
-          const data: any[] = [];
+        const qSnap = await getDocs(q);
+        const data: any[] = [];
           
-          qSnap.forEach(d => {
-             const dData = d.data() as any;
-             data.push({ id: d.id, ...dData });
-          });
+        qSnap.forEach(d => {
+           const dData = d.data() as any;
+           data.push({ id: d.id, ...dData });
+        });
 
           // Match students
           data.forEach(r => {
@@ -70,41 +69,8 @@ export function AdminResults() {
              }) || 'Unknown Date';
           });
 
-          const now = Date.now();
-          const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-          const idsToDelete: string[] = [];
-          const keptData: any[] = [];
-          
-          data.forEach(r => {
-             if (r.createdAt) {
-                 const age = now - r.createdAt.toMillis();
-                 if (age > TWENTY_FOUR_HOURS) {
-                     idsToDelete.push(r.id);
-                     return;
-                 }
-             }
-             keptData.push(r);
-          });
-
-          if (idsToDelete.length > 0) {
-             setTimeout(async () => {
-                try {
-                   const chunks = [];
-                   for(let i=0; i<idsToDelete.length; i+=500) chunks.push(idsToDelete.slice(i, i+500));
-                   for (const chunk of chunks) {
-                      const batchFn = writeBatch(db);
-                      chunk.forEach(id => batchFn.delete(doc(db, 'results', id)));
-                      await batchFn.commit();
-                   }
-                   console.log(`Auto-cleaned ${idsToDelete.length} results older than 24 hours.`);
-                } catch(e) { console.error("Auto delete failed", e); }
-             }, 1000); // 1s delay to not block UI
-          }
-
-          setResults(keptData);
+          setResults(data);
           setLoading(false);
-        });
-
       } catch (error) {
         handleFirestoreError(error, OperationType.LIST, 'results/batches');
         setLoading(false);
@@ -113,10 +79,7 @@ export function AdminResults() {
 
     fetchInitialData();
 
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
-  }, [examId]);
+  }, [examId, refreshKey]);
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -186,7 +149,16 @@ export function AdminResults() {
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
-      <PageHeader title="Exam Results" backTo={examId ? "/admin/library" : "/admin"} />
+      <div className="flex justify-between items-center mb-4">
+        <PageHeader title="Exam Results" backTo={examId ? "/admin/library" : "/admin"} />
+        <button 
+           onClick={() => setRefreshKey(k => k + 1)} 
+           disabled={loading}
+           className="bg-black dark:bg-white text-white dark:text-black font-bold uppercase text-xs px-4 py-2 border-2 border-transparent hover:-translate-y-0.5 transition-transform disabled:opacity-50"
+        >
+           {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
       
       {!examId && batches.length > 0 && (
         <div className="mb-6 border-4 border-black bg-white dark:bg-zinc-900 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] flex flex-col">

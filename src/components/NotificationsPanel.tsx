@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Bell, Plus, Edit, Trash2, CheckCircle, Loader2 } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import { db } from '../lib/firebase';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, arrayUnion, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, arrayUnion, limit } from 'firebase/firestore';
 
 export function NotificationsPanel({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
@@ -19,16 +19,18 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState('');
   const [targetBatch, setTargetBatch] = useState('all'); // 'all' or batchId
   const [submitting, setSubmitting] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!user) return;
     
-    // Listen to batches for dropdown and mapping
-    const uBatches = onSnapshot(collection(db, 'batches'), (snap) => {
+    // Fetch batches for dropdown and mapping
+    const fetchBatches = async () => {
+       const snap = await getDocs(collection(db, 'batches'));
        setBatches(snap.docs.map(doc => ({id: doc.id, ...doc.data()})));
-    });
-    return () => uBatches();
-  }, [user?.role]);
+    };
+    fetchBatches();
+  }, [user?.role, refreshKey]);
 
   useEffect(() => {
     if (!user) return;
@@ -42,7 +44,8 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
        q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(100));
     }
 
-    const unsub = onSnapshot(q, (snap) => {
+    const fetchNotifs = async () => {
+       const snap = await getDocs(q);
        let notifs = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
        if (user.role === 'student') {
           // Client side filter
@@ -55,9 +58,9 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
        }
        setNotifications(notifs);
        setLoading(false);
-    });
-    return () => unsub();
-  }, [user?.uid, user?.role, (user as any)?.batchId]);
+    };
+    fetchNotifs();
+  }, [user?.uid, user?.role, (user as any)?.batchId, refreshKey]);
 
   const handleSubmit = async (e: React.FormEvent) => {
      e.preventDefault();
@@ -145,8 +148,13 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
        <div className="bg-white dark:bg-zinc-900 border-l-4 sm:border-4 border-black dark:border-zinc-100 sm:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] w-full sm:max-w-md h-full sm:h-auto sm:max-h-[85vh] flex flex-col relative overflow-hidden">
           
           <div className="bg-zinc-100 dark:bg-zinc-800 p-4 font-black uppercase text-xl flex justify-between items-center border-b-4 border-black dark:border-zinc-100 shrink-0">
-             <div className="flex items-center gap-2">
-                 <Bell className="w-5 h-5" /> Notifications
+             <div className="flex items-center gap-4">
+                 <div className="flex items-center gap-2">
+                    <Bell className="w-5 h-5" /> Notifications
+                 </div>
+                 <button onClick={() => setRefreshKey(k => k + 1)} className="text-xs uppercase bg-black dark:bg-zinc-100 text-white dark:text-black px-2 py-1 flex items-center gap-1 active:translate-y-px">
+                     Refresh
+                 </button>
              </div>
              <button onClick={onClose} className="hover:text-red-500 transition-colors bg-white dark:bg-zinc-900 border-2 border-black dark:border-zinc-100 p-1">
                 <X className="w-5 h-5" />

@@ -53,9 +53,29 @@ export function StudentLibrary() {
 
   const [weeksToShow, setWeeksToShow] = useState(2);
   const [allAssigns, setAllAssigns] = useState<any[]>([]);
-  const [libraryCache, setLibraryCache] = useState<Map<string, LibraryItem>>(new Map());
+  const [libraryCache, setLibraryCache] = useState<Map<string, LibraryItem>>(() => {
+    try {
+      const saved = localStorage.getItem('libraryCache');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Simple 24h expiration check for cache entries could be added,
+        // but user requested "saved to local server ... next time, from local server."
+        // We will just load all of them.
+        return new Map(Object.entries(parsed)) as Map<string, LibraryItem>;
+      }
+    } catch(e) { console.error('Cache load error', e); }
+    return new Map();
+  });
   const [fetchedFolders, setFetchedFolders] = useState<Set<string>>(new Set());
   const [libraryMode, setLibraryMode] = useState<'EXAM' | 'NOTE' | null>(null);
+
+  useEffect(() => {
+    try {
+       if (libraryCache.size > 0) {
+          localStorage.setItem('libraryCache', JSON.stringify(Object.fromEntries(libraryCache)));
+       }
+    } catch(e) { }
+  }, [libraryCache]);
 
   useEffect(() => {
     if (!user?.batchId) {
@@ -664,11 +684,22 @@ export function StudentLibrary() {
       )}
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-          <PageHeader 
-             title="My Target Library" 
-             backTo="/" 
-             onBack={currentFolderId ? handleBackNavigation : undefined} 
-          />
+          <div className="flex items-center gap-4">
+             <PageHeader 
+                title="My Target Library" 
+                backTo="/" 
+                onBack={currentFolderId ? handleBackNavigation : undefined} 
+             />
+             <button 
+                onClick={() => {
+                   localStorage.removeItem('libraryCache');
+                   window.location.reload();
+                }}
+                className="bg-black dark:bg-white text-white dark:text-black font-bold uppercase text-xs px-4 py-2 border-2 border-transparent hover:-translate-y-0.5 transition-transform"
+             >
+                Refresh
+             </button>
+          </div>
           
           <div className="w-full sm:max-w-md relative">
              <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />

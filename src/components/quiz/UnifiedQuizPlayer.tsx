@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Exam } from '../../pages/Pages';
-import { addDoc, collection, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../AuthProvider';
 
@@ -15,10 +15,22 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   const [checkingResult, setCheckingResult] = useState(true);
   const [resultSummary, setResultSummary] = useState<{ score: number, total: number, correct: number, wrong: number, skipped: number } | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [timeUntilStart, setTimeUntilStart] = useState<number | null>(null);
 
   // Auto-resume if there is an active valid quiz session in localStorage
   useEffect(() => {
      if (isPreview) return;
+
+     // Scheduling check
+     if ((exam as any).scheduledStartTime) {
+         const startTime = new Date((exam as any).scheduledStartTime).getTime();
+         const diff = Math.max(0, Math.floor((startTime - Date.now()) / 1000));
+         if (diff > 0) {
+             setTimeUntilStart(diff);
+             return;
+         }
+     }
+
      const endTime = localStorage.getItem(`quiz_endtime_${exam.id}`);
      if (endTime) {
         const remaining = Math.max(0, Math.floor((parseInt(endTime) - Date.now()) / 1000));
@@ -103,6 +115,21 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   // Extract questions and config
   const questions = Array.isArray(quizData) ? quizData : quizData.questions || [];
   const passage = !Array.isArray(quizData) ? quizData.passage : '';
+
+  useEffect(() => {
+    if (timeUntilStart !== null && timeUntilStart > 0) {
+      const timer = setInterval(() => {
+        setTimeUntilStart(prev => {
+          if (prev && prev <= 1) {
+             clearInterval(timer);
+             return null;
+          }
+          return prev ? prev - 1 : null;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [timeUntilStart]);
   
   // library items might define config on the root level
   const rootConfig = {
@@ -195,6 +222,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
     });
 
     if (user && !isPreview) {
+      // expireAt = 24 hours from now — Firebase TTL policy will auto-delete this document
+      const expireAt = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
       await addDoc(collection(db, 'results'), {
          studentId: user.uid,
          examId: exam.id,
@@ -202,7 +231,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
          score,
          totalPossible: questions.length * config.marksCorrect,
          answers,
-         createdAt: serverTimestamp()
+         createdAt: serverTimestamp(),
+         expireAt: expireAt
       });
     }
   };
@@ -245,6 +275,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   }
 
   if (screen === 'LANDING') {
+    const isLocked = timeUntilStart !== null && timeUntilStart > 0;
+    
     return (
       <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)]">
         <h2 className="text-2xl font-black uppercase mb-2">{exam.title}</h2>
@@ -254,8 +286,20 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
            <div className="font-mono text-sm">Time: {Math.floor(config.totalTime / 60)} minutes</div>
            <div className="font-mono text-sm">Marks: +{config.marksCorrect} / {config.marksWrong}</div>
         </div>
+
+        {isLocked && (
+           <div className="bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-500 p-4 mb-6 text-center">
+              <div className="font-black text-orange-600 dark:text-orange-400 uppercase mb-1">Exam starts in</div>
+              <div className="text-3xl font-mono font-bold text-orange-700 dark:text-orange-300">
+                 {Math.floor(timeUntilStart / 3600).toString().padStart(2, '0')}:
+                 {Math.floor((timeUntilStart % 3600) / 60).toString().padStart(2, '0')}:
+                 {Math.floor(timeUntilStart % 60).toString().padStart(2, '0')}
+              </div>
+           </div>
+        )}
+
         <div className="flex gap-4">
-          <button onClick={startQuiz} className="flex-1 bg-emerald-600 text-white font-bold uppercase py-3 border-2 border-transparent hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(4,120,87,1)]">Start Quiz</button>
+          <button disabled={isLocked} onClick={startQuiz} className="flex-1 bg-emerald-600 text-white font-bold uppercase py-3 border-2 border-transparent hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(4,120,87,1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">Start Quiz</button>
           <button onClick={onBack} className="bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-white font-bold uppercase py-3 px-6 border-2 border-zinc-900 dark:border-zinc-100 hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">Back</button>
         </div>
       </div>
@@ -358,7 +402,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
                                 textClass = "text-red-900 dark:text-red-100";
                              }
                           } else if (isSelected) {
-                             bgClass = "bg-zinc-200 dark:bg-zinc-700";
+                             bgClass = "bg-emerald-50 dark:bg-emerald-900/20";
+                             borderClass = "border-emerald-400 border-dashed dark:border-emerald-500 shadow-[0_0_0_2px_rgba(52,211,153,0.3)]";
                           }
 
                           return (

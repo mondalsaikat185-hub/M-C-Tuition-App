@@ -80,11 +80,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribeFb = onAuthStateChanged(auth, async (firebaseUser) => {
       setFbUser(firebaseUser);
-      
-      if (docUnsubscribe) {
-        docUnsubscribe();
-        docUnsubscribe = null;
-      }
 
       if (firebaseUser) {
         const userRef = doc(db, 'users', firebaseUser.uid);
@@ -108,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
              }
           }
 
-          // Initialize if it doesn't exist
+          // Initialize if it doesn't exist, then load into state
           const docSnap = await getDoc(userRef);
 
           if (!docSnap.exists()) {
@@ -153,8 +148,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                    console.error("Failed to delete orphaned user doc", e);
                }
             }
+
+            const freshSnap = await getDoc(userRef);
+            if (freshSnap.exists()) setUser(freshSnap.data() as AppUser);
           } else {
-            // Already exists, but we should make sure admin has admin role & update devices
+            // Already exists
             const data = docSnap.data();
             const updates: any = {};
             if (isAdmin && (data.role !== 'admin' || data.status !== 'active')) {
@@ -166,10 +164,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               try {
                  await updateDoc(userRef, updates);
               } catch (e: any) {
-                 console.warn("Non-fatal error updating user device info", e);
+                 console.warn("Non-fatal error updating user", e);
               }
             }
+            // Use the already-fetched docSnap — NO extra read needed
+            setUser({ ...data, ...updates } as AppUser);
           }
+          setLoading(false);
         } catch (error: any) {
           if (error?.message?.includes('Quota') || error?.code === 'resource-exhausted') {
              console.error('AuthProvider setup error:', error);
@@ -182,31 +183,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
              setQuotaError('Setup Error: ' + error.message);
           }
           setLoading(false);
-          return; // STOP EXECUTION HERE SO WE DON'T ENTER ONSNAPSHOT WITH FAULTY STATE
+          return;
         }
-
-        // Listen for real-time updates
-        docUnsubscribe = onSnapshot(userRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data() as AppUser;
-
-            setUser(data);
-          } else {
-             setUser(null); // Explicitly clear if missing
-          }
-          setLoading(false);
-        }, (error: any) => {
-          console.error('User snapshot error:', error);
-          setLoading(false);
-          if (error?.message?.includes('Quota') || error?.code === 'resource-exhausted') {
-             setQuotaError('ডেটাবেস এর আজকের ফ্রি লিমিট শেষ (Quota Exceeded)।');
-          } else if (error?.message?.includes('offline') || error?.code === 'unavailable') {
-             // Silently ignore offline error in snapshot to avoid spam
-             console.log("Client offline, snapshot failed.");
-          } else {
-             setQuotaError('ডেটা লোড করতে সমস্যা হয়েছে: ' + error.message);
-          }
-        });
 
       } else {
         setUser(null);
@@ -216,9 +194,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsubscribeFb();
-      if (docUnsubscribe) {
-        docUnsubscribe();
-      }
     };
   }, []);
 

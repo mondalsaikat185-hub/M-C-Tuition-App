@@ -93,6 +93,7 @@ export function AdminLibrary() {
   const [marksCorrect, setMarksCorrect] = useState(1);
   const [marksWrong, setMarksWrong] = useState(0.25);
   const [allowMultipleAttempts, setAllowMultipleAttempts] = useState(false);
+  const [scheduledStartTime, setScheduledStartTime] = useState('');
   // Note extra
   const [linkUrl, setLinkUrl] = useState('');
   const [contentUrl, setContentUrl] = useState('');
@@ -380,6 +381,9 @@ export function AdminLibrary() {
            payload.marksCorrect = marksCorrect;
            payload.marksWrong = marksWrong;
            payload.allowMultipleAttempts = allowMultipleAttempts;
+           if (scheduledStartTime) {
+              payload.scheduledStartTime = scheduledStartTime;
+           }
            await addDoc(collection(db, 'library'), payload);
            setIsUploadModalOpen(false);
            resetForm();
@@ -711,11 +715,20 @@ export function AdminLibrary() {
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
-      <PageHeader 
-         title="Central Library" 
-         backTo="/admin" 
-         onBack={currentFolderId ? handleBackNavigation : undefined} 
-      />
+      <div className="flex justify-between items-center mb-4">
+        <PageHeader 
+           title="Central Library" 
+           backTo="/admin" 
+           onBack={currentFolderId ? handleBackNavigation : undefined} 
+        />
+        <button 
+           onClick={() => fetchLibrary()} 
+           disabled={loading}
+           className="bg-black dark:bg-zinc-100 text-white dark:text-black font-bold uppercase text-xs px-4 py-2 border-2 border-transparent hover:-translate-y-0.5 transition-transform disabled:opacity-50"
+        >
+           {loading ? '...' : 'Refresh'}
+        </button>
+      </div>
       
       {!activeSession && activeSessionsList.length > 0 && (
         <div className="mb-6 p-4 bg-yellow-100 border-2 border-yellow-500 text-yellow-900 font-bold text-sm shadow-[4px_4px_0px_0px_rgba(234,179,8,1)] flex items-center justify-between">
@@ -1011,6 +1024,12 @@ export function AdminLibrary() {
                          <input type="checkbox" checked={allowMultipleAttempts} onChange={e => setAllowMultipleAttempts(e.target.checked)} className="w-5 h-5 accent-zinc-900 dark:accent-zinc-100" />
                          Allow Students to Re-take Exam Multiple Times
                        </label>
+
+                       <div className="bg-orange-50 dark:bg-orange-900/20 p-3 border-2 border-orange-500">
+                         <label className="block text-xs font-bold uppercase mb-1 text-orange-800 dark:text-orange-200">Scheduled Start Time (Optional Lockdown)</label>
+                         <input type="datetime-local" value={scheduledStartTime} onChange={e => setScheduledStartTime(e.target.value)} className="w-full border-2 border-orange-800/50 p-2 bg-transparent text-sm" />
+                         <p className="text-xs mt-1 text-orange-700/80">If set, the exam will be visible but locked until this time.</p>
+                       </div>
 
                        <div>
                          <label className="block text-xs font-bold uppercase mb-1 text-emerald-600 dark:text-emerald-400">1. Auto-extract via JS/HTML/JSON Upload</label>

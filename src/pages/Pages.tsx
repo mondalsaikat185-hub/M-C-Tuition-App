@@ -45,6 +45,7 @@ export function AdminStudents() {
   const [addingNewStudent, setAddingNewStudent] = useState(false);
   const [studentTab, setStudentTab] = useState<string>('pending');
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<AppUser | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const handleCreateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,13 +65,23 @@ export function AdminStudents() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+      setStudents(prev => [...prev, {
+        uid: mockUid,
+        email: newStudentEmail.toLowerCase(),
+        fullName: newStudentName,
+        phone: newStudentPhone,
+        role: 'student',
+        status: 'active',
+        batchId: newStudentBatch,
+        isProfileComplete: true,
+        monthlyFee: 500,
+      } as any]);
       alert(`Student ${newStudentName} created successfully!`);
       setNewStudentName('');
       setNewStudentEmail('');
       setNewStudentBatch('');
       setNewStudentPhone('');
       setAddingNewStudent(false);
-      window.location.reload();
     } catch (err) {
       alert("Error creating student: " + String(err));
     }
@@ -86,25 +97,24 @@ export function AdminStudents() {
 
   useEffect(() => {
     if (!batches.length) return;
-    if (!activeBatchTab) setActiveBatchTab(batches[0].id);
-    const fetchAll = async () => {
-      const result: Record<string, Array<{ date: string; presentStudentIds: string[] }>> = {};
-      for (const batch of batches) {
-        result[batch.id] = await getAllAttendanceForBatch(batch.id);
-      }
-      setAttendanceData(result);
+    if (!activeBatchTab) { setActiveBatchTab(batches[0].id); return; }
+
+    // Only fetch if we don't already have this batch's data
+    if (attendanceData[activeBatchTab]) return;
+
+    const fetchOneBatch = async () => {
+      const data = await getAllAttendanceForBatch(activeBatchTab);
+      setAttendanceData(prev => ({ ...prev, [activeBatchTab]: data }));
     };
-    fetchAll();
-  }, [batches, activeBatchTab]);
+    fetchOneBatch();
+  }, [activeBatchTab, batches.length]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [studentsSnap, batchesSnap, attendanceSnap, resultsSnap] = await Promise.all([
+        const [studentsSnap, batchesSnap] = await Promise.all([
           getDocs(collection(db, 'users')),
           getDocs(collection(db, 'batches')),
-          getDocs(collection(db, 'attendance')),
-          getDocs(collection(db, 'results'))
         ]);
         
         const studentsData: AppUser[] = [];
@@ -122,54 +132,6 @@ export function AdminStudents() {
         });
         setBatches(batchesData);
 
-        const absentCount: Record<string, number> = {};
-        
-        // Group attendance records by batch and sort by date
-        const attendanceByBatch: Record<string, { date: string; presentStudentIds: string[] }[]> = {};
-        attendanceSnap.forEach((doc) => {
-            const r = doc.data();
-            if (r.batchId && r.date && r.presentStudentIds) {
-                if (!attendanceByBatch[r.batchId]) attendanceByBatch[r.batchId] = [];
-                attendanceByBatch[r.batchId].push({
-                    date: r.date,
-                    presentStudentIds: r.presentStudentIds as string[]
-                });
-            }
-        });
-
-        // Check only the last 8 sessions for each active student
-        studentsData.forEach(student => {
-            if (student.status !== 'active' || !student.batchId) return;
-            const sessions = (attendanceByBatch[student.batchId] || [])
-                .sort((a, b) => b.date.localeCompare(a.date))  // newest first
-                .slice(0, 8);  // last 8 sessions
-
-            let absent = 0;
-            sessions.forEach(session => {
-                if (!session.presentStudentIds.includes(student.uid)) {
-                    absent++;
-                }
-            });
-            absentCount[student.uid] = absent;
-        });
-        setStudentAbsentCount(absentCount);
-
-        const marksMap: Record<string, {marks: string, examTitle: string}[]> = {};
-        resultsSnap.forEach((doc) => {
-           const r = doc.data();
-           if (r.studentId && r.createdAt) {
-               const dt = r.createdAt.toDate();
-               const dateStr = dt.toISOString().split('T')[0];
-               const key = `${r.studentId}_${dateStr}`;
-               if (!marksMap[key]) marksMap[key] = [];
-               marksMap[key].push({
-                   marks: `${r.score}/${r.totalPossible}`,
-                   examTitle: r.examTitle || 'Exam'
-               });
-           }
-        });
-        setStudentMarks(marksMap);
-
       } catch (error) {
         handleFirestoreError(error, OperationType.LIST, 'users/batches');
       } finally {
@@ -177,7 +139,7 @@ export function AdminStudents() {
       }
     };
     fetchData();
-  }, []);
+  }, [refreshKey]);
 
   const handleStatusChange = async (uid: string, newStatus: string) => {
     try {
@@ -208,7 +170,16 @@ export function AdminStudents() {
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
-      <PageHeader title="Manage Students (Attendance & Settings)" backTo="/admin" />
+      <div className="flex justify-between items-start">
+        <PageHeader title="Manage Students (Attendance & Settings)" backTo="/admin" />
+        <button 
+           onClick={() => setRefreshKey(k => k + 1)} 
+           disabled={loading}
+           className="bg-black dark:bg-zinc-100 text-white dark:text-black font-bold uppercase text-xs px-4 py-2 border-2 border-transparent hover:-translate-y-0.5 transition-transform shrink-0 disabled:opacity-50"
+        >
+           {loading ? '...' : 'Refresh'}
+        </button>
+      </div>
 
       {selectedStudentForModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -718,7 +689,16 @@ export function AdminBatches() {
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
-      <PageHeader title="Manage Batches" backTo="/admin" />
+      <div className="flex justify-between items-start">
+        <PageHeader title="Manage Batches" backTo="/admin" />
+        <button 
+           onClick={() => fetchBatches()} 
+           disabled={loading}
+           className="bg-black dark:bg-zinc-100 text-white dark:text-black font-bold uppercase text-xs px-4 py-2 border-2 border-transparent hover:-translate-y-0.5 transition-transform shrink-0 disabled:opacity-50"
+        >
+           {loading ? '...' : 'Refresh'}
+        </button>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-1 bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)]">
           <h3 className="font-black uppercase mb-4">Add New Batch</h3>
@@ -1742,21 +1722,24 @@ export function StudentPayments() {
      };
      loadSettings();
 
-     const q = query(collection(db, 'payments'), where('studentId', '==', user.uid));
-     const unsubscribe = onSnapshot(q, (snap) => {
-       const data: Payment[] = [];
-       snap.forEach((doc) => {
-         data.push({ id: doc.id, ...doc.data() } as Payment);
-       });
-       data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-       setPayments(data);
-       setLoading(false);
-     }, (error) => {
-       console.error("Payment fetch error:", error);
-       setLoading(false);
-     });
+     const fetchPayments = async () => {
+       try {
+         const q = query(collection(db, 'payments'), where('studentId', '==', user.uid));
+         const snap = await getDocs(q);
+         const data: Payment[] = [];
+         snap.forEach((doc) => {
+           data.push({ id: doc.id, ...doc.data() } as Payment);
+         });
+         data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+         setPayments(data);
+         setLoading(false);
+       } catch (error) {
+         console.error("Payment fetch error:", error);
+         setLoading(false);
+       }
+     };
 
-     return () => unsubscribe();
+     fetchPayments();
   }, [user?.uid]);
 
   const currentYear = new Date().getFullYear();
