@@ -1328,7 +1328,8 @@ export function AdminPayments() {
       
       const pData: Payment[] = [];
       pSnap.forEach(d => pData.push({ id: d.id, ...d.data() } as Payment));
-      pData.sort((a,b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+      const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+      pData.sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
       setPayments(pData);
 
       const uData: any[] = [];
@@ -1730,7 +1731,8 @@ export function StudentPayments() {
          snap.forEach((doc) => {
            data.push({ id: doc.id, ...doc.data() } as Payment);
          });
-         data.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+         const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+         data.sort((a, b) => getMs(b.createdAt) - getMs(a.createdAt));
          setPayments(data);
          setLoading(false);
        } catch (error) {

@@ -121,7 +121,8 @@ export function AdminLibrary() {
       const snap = await getDocs(q);
       const data: LibraryItem[] = [];
       snap.forEach(d => data.push({ id: d.id, ...d.data() } as LibraryItem));
-      data.sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+      data.sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
       setItems(data);
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'library');
@@ -654,7 +655,8 @@ export function AdminLibrary() {
   const breadcrumbs = getBreadcrumbs();
   const currentItems = items.filter(i => (i.parentId || null) === currentFolderId);
   const folders = currentItems.filter(i => i.isFolder).sort((a,b) => a.title.localeCompare(b.title));
-  const files = currentItems.filter(i => !i.isFolder).sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+  const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+  const files = currentItems.filter(i => !i.isFolder).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
 
   const toggleMultipleAttempts = async (item: LibraryItem) => {
      try {

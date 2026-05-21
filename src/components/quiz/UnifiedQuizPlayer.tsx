@@ -15,32 +15,10 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   const [checkingResult, setCheckingResult] = useState(true);
   const [resultSummary, setResultSummary] = useState<{ score: number, total: number, correct: number, wrong: number, skipped: number } | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
-  const [timeUntilStart, setTimeUntilStart] = useState<number | null>(null);
 
   // Auto-resume if there is an active valid quiz session in localStorage
   useEffect(() => {
      if (isPreview) return;
-
-     // Scheduling check
-     if ((exam as any).scheduledStartTime) {
-         const startTime = new Date((exam as any).scheduledStartTime).getTime();
-         const diff = Math.max(0, Math.floor((startTime - Date.now()) / 1000));
-         if (diff > 0) {
-             setTimeUntilStart(diff);
-             
-             const timer = setInterval(() => {
-                 const remaining = Math.max(0, Math.floor((startTime - Date.now()) / 1000));
-                 if (remaining <= 0) {
-                     setTimeUntilStart(null);
-                     clearInterval(timer);
-                 } else {
-                     setTimeUntilStart(remaining);
-                 }
-             }, 1000);
-             
-             return () => clearInterval(timer);
-         }
-     }
 
      const endTime = localStorage.getItem(`quiz_endtime_${exam.id}`);
      if (endTime) {
@@ -74,12 +52,17 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
           setCheckingResult(false);
           return;
        }
-       const q = query(collection(db, 'results'), where('studentId', '==', user.uid), where('examId', '==', exam.id));
-       const snap = await getDocs(q);
-       if (!snap.empty) {
-          setAlreadySubmitted(true);
+       try {
+          const q = query(collection(db, 'results'), where('studentId', '==', user.uid), where('examId', '==', exam.id));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+             setAlreadySubmitted(true);
+          }
+       } catch (err) {
+          console.warn('Could not check previous result:', err);
+       } finally {
+          setCheckingResult(false);
        }
-       setCheckingResult(false);
     };
     checkPrevious();
   }, [user, exam.id]);
@@ -124,8 +107,10 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   }, [exam.quizData]);
 
   // Extract questions and config
-  const questions = Array.isArray(quizData) ? quizData : quizData.questions || [];
-  const passage = !Array.isArray(quizData) ? quizData.passage : '';
+  const questionsRaw = (quizData !== null && typeof quizData === 'object' && !Array.isArray(quizData)) ? quizData.questions || [] : quizData;
+  const questions = Array.isArray(questionsRaw) ? questionsRaw : [];
+  const passageRaw = (!Array.isArray(quizData) && quizData !== null) ? quizData.passage : '';
+  const passage = typeof passageRaw === 'string' ? passageRaw : '';
 
   // library items might define config on the root level
   const rootConfig = {
@@ -134,7 +119,7 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
      marksWrong: (exam as any).marksWrong > 0 ? -(exam as any).marksWrong : (exam as any).marksWrong // ensure it's negative or wait, user specifies +2, -0.5 or just 0.5? Usually 0.5 means deduct 0.5.
   };
 
-  const parsedConfig = (!Array.isArray(quizData) && quizData.config) ? quizData.config : {};
+  const parsedConfig = (quizData !== null && typeof quizData === 'object' && !Array.isArray(quizData) && quizData.config) ? quizData.config : {};
   const config = { 
     totalTime: rootConfig.totalTime ?? 1800, 
     marksCorrect: rootConfig.marksCorrect ?? 2, 
@@ -234,7 +219,14 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   };
 
   if (checkingResult) {
-     return <div className="p-6 text-center">Checking status...</div>;
+     return (
+        <div className="p-8 text-center flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-zinc-300 border-t-zinc-900 rounded-full animate-spin"></div>
+          <p className="font-bold text-zinc-600 dark:text-zinc-400">
+            Checking... / যাচাই করা হচ্ছে
+          </p>
+        </div>
+     );
   }
 
   if (alreadySubmitted) {
@@ -271,7 +263,6 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   }
 
   if (screen === 'LANDING') {
-    const isLocked = timeUntilStart !== null && timeUntilStart > 0;
     
     return (
       <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)]">
@@ -283,19 +274,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
            <div className="font-mono text-sm">Marks: +{config.marksCorrect} / {config.marksWrong}</div>
         </div>
 
-        {isLocked && (
-           <div className="bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-500 p-4 mb-6 text-center">
-              <div className="font-black text-orange-600 dark:text-orange-400 uppercase mb-1">Exam starts in</div>
-              <div className="text-3xl font-mono font-bold text-orange-700 dark:text-orange-300">
-                 {timeUntilStart !== null ? 
-                    `${Math.floor(timeUntilStart / 3600).toString().padStart(2, '0')}:${Math.floor((timeUntilStart % 3600) / 60).toString().padStart(2, '0')}:${Math.floor(timeUntilStart % 60).toString().padStart(2, '0')}`
-                 : '00:00:00'}
-              </div>
-           </div>
-        )}
-
         <div className="flex gap-4">
-          <button disabled={isLocked} onClick={startQuiz} className="flex-1 bg-emerald-600 text-white font-bold uppercase py-3 border-2 border-transparent hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(4,120,87,1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">Start Quiz</button>
+          <button onClick={startQuiz} className="flex-1 bg-emerald-600 text-white font-bold uppercase py-3 border-2 border-transparent hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(4,120,87,1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">Start Quiz</button>
           <button onClick={onBack} className="bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-white font-bold uppercase py-3 px-6 border-2 border-zinc-900 dark:border-zinc-100 hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">Back</button>
         </div>
       </div>
@@ -364,7 +344,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
           <div className={`${passage ? "md:col-span-1" : "md:col-span-2"} flex flex-col gap-6`}>
              {questions.map((q: any, i: number) => {
                const qText = (lang === 'bn' && q.question_bn) ? q.question_bn : (q.question_en || q.question || 'Question ?');
-               const opts = (lang === 'bn' && q.options_bn && q.options_bn.length) ? q.options_bn : (q.options_en || q.options || []);
+               const optsRaw = (lang === 'bn' && q.options_bn && q.options_bn.length) ? q.options_bn : (q.options_en || q.options || []);
+               const opts = Array.isArray(optsRaw) ? optsRaw : [];
 
                return (
                  <div key={i} className="bg-white dark:bg-zinc-900 border-x border-y border-zinc-200 dark:border-zinc-800 p-6 shadow-sm rounded-xl relative overflow-hidden transition-all duration-300 hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50 group">

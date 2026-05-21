@@ -89,8 +89,9 @@ export function StudentLibrary() {
            const assignSnaps = await getDocs(query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId)));
            const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()} as any));
            assigns.sort((a,b) => {
-               const tA = a.assignedAt?.toMillis() || 0;
-               const tB = b.assignedAt?.toMillis() || 0;
+               const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+               const tA = getMs(a.assignedAt);
+               const tB = getMs(b.assignedAt);
                return tB - tA;
            });
            setAllAssigns(assigns);
@@ -112,7 +113,8 @@ export function StudentLibrary() {
 
       const cutoff = Date.now() - (weeksToShow * 7 * 24 * 60 * 60 * 1000);
       const visibleAssigns = allAssigns.filter(a => {
-         const t = a.assignedAt?.toMillis() || 0;
+         const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+         const t = getMs(a.assignedAt);
          return t === 0 || t >= cutoff; // t===0 includes legacy without timestamp
       });
       const neededRootIds = Array.from(new Set<string>(visibleAssigns.map(a => a.libraryItemId)));
@@ -147,14 +149,7 @@ export function StudentLibrary() {
       }
 
       const filteredItems = Array.from<LibraryItem>(libraryCache.values())
-          .filter(i => accessible.has(i.id))
-          .map(i => {
-              const ownAssign = allAssigns.find(a => a.libraryItemId === i.id);
-              if (ownAssign && ownAssign.scheduledStartTime !== undefined) {
-                  return { ...(i as any), scheduledStartTime: ownAssign.scheduledStartTime };
-              }
-              return i;
-          });
+          .filter(i => accessible.has(i.id));
       
       setItems(filteredItems);
   }, [allAssigns, weeksToShow, libraryCache]);
@@ -169,7 +164,8 @@ export function StudentLibrary() {
         const cutoff = Date.now() - (weeksToShow * 7 * 24 * 60 * 60 * 1000);
         
         const visibleAssigns = allAssigns.filter(a => {
-           const t = a.assignedAt?.toMillis() || 0;
+           const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+           const t = getMs(a.assignedAt);
            return t === 0 || t >= cutoff; // t===0 includes legacy without timestamp
         });
 
@@ -492,14 +488,6 @@ export function StudentLibrary() {
             return;
          }
 
-         if (item.scheduledStartTime) {
-             const startTimeMs = new Date(item.scheduledStartTime).getTime();
-             if (startTimeMs > Date.now()) {
-                alert(`এই পরীক্ষাটি ${new Date(item.scheduledStartTime).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} এ শুরু হবে।`);
-                return;
-             }
-         }
-
          const q = query(
             collection(db, 'examSessions'),
             where('examId', '==', item.id)
@@ -650,12 +638,13 @@ export function StudentLibrary() {
          (!i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam'))
        )
   );
+  const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
   const folders = currentItems.filter(i => i.isFolder).sort((a,b) => a.title.localeCompare(b.title));
-  const files = currentItems.filter(i => !i.isFolder).sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+  const files = currentItems.filter(i => !i.isFolder).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
 
   const allFilesSorted = searchQuery 
     ? files 
-    : items.filter(i => !i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam')).sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+    : items.filter(i => !i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam')).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
 
   const formatDate = (timestamp: any) => {
      if (!timestamp) return 'No date';
@@ -909,18 +898,8 @@ function FileCard({ item, onPreview, formatDate, showPath, items, onDownloadChun
       return <div className="text-[10px] uppercase font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 mt-2 inline-block">📁 {pstr}</div>;
    };
 
-   let isLocked = false;
-   let lockUnlockStr = '';
-   if (item.type === 'exam' && item.scheduledStartTime) {
-      const lockMs = new Date(item.scheduledStartTime).getTime();
-      if (lockMs > Date.now()) {
-         isLocked = true;
-         lockUnlockStr = new Date(item.scheduledStartTime).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      }
-   }
-
    return (
-      <div className={`bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 ${isLocked ? 'opacity-70' : ''}`}>
+      <div className={`bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4`}>
          <div>
             <div className="flex items-center gap-2 mb-1">
               <h4 className="font-black text-lg text-zinc-900 dark:text-zinc-100">{item.title}</h4>
@@ -958,20 +937,18 @@ function FileCard({ item, onPreview, formatDate, showPath, items, onDownloadChun
            {item.type === 'exam' && item.examType === 'Online Link' && item.contentUrl ? (
               <button 
                  onClick={() => {
-                    if (isLocked) { alert(`This exam is locked until ${lockUnlockStr}`); return; }
                     window.open(item.contentUrl, '_blank');
                  }}
-                 className={`flex items-center gap-1 bg-blue-100 text-blue-900 px-4 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold text-xs ${isLocked ? 'cursor-not-allowed opacity-50' : 'hover:-translate-y-0.5 transition-transform shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)]'} whitespace-nowrap`}
+                 className='flex items-center gap-1 bg-blue-100 text-blue-900 px-4 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold text-xs hover:-translate-y-0.5 transition-transform shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)] whitespace-nowrap'
               >
-                 <BookOpen className="w-3.5 h-3.5" /> {isLocked ? `Locked till ${lockUnlockStr}` : 'Take Exam'}
+                 <BookOpen className="w-3.5 h-3.5" /> Take Exam
               </button>
            ) : item.type === 'exam' ? (
               <button 
                 onClick={onPreview} 
-                disabled={isLocked}
-                className={`flex items-center gap-1 ${isLocked ? 'bg-zinc-300 text-zinc-600 cursor-not-allowed' : 'bg-blue-100 text-blue-900 hover:-translate-y-0.5 transition-transform shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)]'} px-4 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold text-xs whitespace-nowrap`}
+                className='flex items-center gap-1 bg-blue-100 text-blue-900 hover:-translate-y-0.5 transition-transform shadow-[2px_2px_0px_0px_rgba(24,24,27,1)] dark:shadow-[2px_2px_0px_0px_rgba(244,244,245,1)] px-4 py-2 border-2 border-zinc-900 dark:border-zinc-100 font-bold text-xs whitespace-nowrap'
               >
-                 <BookOpen className="w-3.5 h-3.5" /> {isLocked ? `Locked till ${lockUnlockStr}` : 'Take Exam'}
+                 <BookOpen className="w-3.5 h-3.5" /> Take Exam
               </button>
            ) : null}
          </div>

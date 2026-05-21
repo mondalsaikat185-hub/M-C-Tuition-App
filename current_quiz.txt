@@ -1,0 +1,481 @@
+1:import React, { useState, useEffect, useMemo, useRef } from 'react';
+2:import { Exam } from '../../pages/Pages';
+3:import { addDoc, collection, serverTimestamp, getDocs, query, where, Timestamp } from 'firebase/firestore';
+4:import { db } from '../../lib/firebase';
+5:import { useAuth } from '../AuthProvider';
+6:
+7:export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: Exam, onBack: () => void, isPreview?: boolean }) {
+8:  const { user } = useAuth();
+9:  const [screen, setScreen] = useState<'AGREEMENT' | 'LANDING' | 'QUIZ' | 'RESULT'>('AGREEMENT');
+10:  const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
+11:  const [timeLeft, setTimeLeft] = useState(0);
+12:  const [lang, setLang] = useState('en');
+13:  const [agreed, setAgreed] = useState(false);
+14:  const [alreadySubmitted, setAlreadySubmitted] = useState(false);
+15:  const [checkingResult, setCheckingResult] = useState(true);
+16:  const [resultSummary, setResultSummary] = useState<{ score: number, total: number, correct: number, wrong: number, skipped: number } | null>(null);
+17:  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+18:  const [timeUntilStart, setTimeUntilStart] = useState<number | null>(null);
+19:
+20:  // Auto-resume if there is an active valid quiz session in localStorage
+21:  useEffect(() => {
+22:     if (isPreview) return;
+23:
+24:     // Scheduling check
+25:     if ((exam as any).scheduledStartTime) {
+26:         const startTime = new Date((exam as any).scheduledStartTime).getTime();
+27:         const diff = Math.max(0, Math.floor((startTime - Date.now()) / 1000));
+28:         if (diff > 0) {
+29:             setTimeUntilStart(diff);
+30:             
+31:             const timer = setInterval(() => {
+32:                 const remaining = Math.max(0, Math.floor((startTime - Date.now()) / 1000));
+33:                 if (remaining <= 0) {
+34:                     setTimeUntilStart(null);
+35:                     clearInterval(timer);
+36:                 } else {
+37:                     setTimeUntilStart(remaining);
+38:                 }
+39:             }, 1000);
+40:             
+41:             return () => clearInterval(timer);
+42:         }
+43:     }
+44:
+45:     const endTime = localStorage.getItem(`quiz_endtime_${exam.id}`);
+46:     if (endTime) {
+47:        const remaining = Math.max(0, Math.floor((parseInt(endTime) - Date.now()) / 1000));
+48:        if (remaining > 0) {
+49:           setAgreed(true);
+50:           setScreen('QUIZ');
+51:           const saved = localStorage.getItem(`quiz_answers_${exam.id}`);
+52:           if (saved) {
+53:             try { setUserAnswers(JSON.parse(saved)); } catch (e) {}
+54:           }
+55:        } else {
+56:           localStorage.removeItem(`quiz_endtime_${exam.id}`);
+57:           localStorage.removeItem(`quiz_answers_${exam.id}`);
+58:        }
+59:     }
+60:  }, [exam.id, isPreview]);
+61:
+62:  const userAnswersRef = useRef(userAnswers);
+63:  useEffect(() => {
+64:    userAnswersRef.current = userAnswers;
+65:  }, [userAnswers]);
+66:
+67:  useEffect(() => {
+68:    if (!user || isPreview) {
+69:       setCheckingResult(false);
+70:       return;
+71:    }
+72:    const checkPrevious = async () => {
+73:       if ((exam as any).allowMultipleAttempts) {
+74:          setCheckingResult(false);
+75:          return;
+76:       }
+77:       const q = query(collection(db, 'results'), where('studentId', '==', user.uid), where('examId', '==', exam.id));
+78:       const snap = await getDocs(q);
+79:       if (!snap.empty) {
+80:          setAlreadySubmitted(true);
+81:       }
+82:       setCheckingResult(false);
+83:    };
+84:    checkPrevious();
+85:  }, [user, exam.id]);
+86:
+87:  // Anti-cheat listener
+88:  useEffect(() => {
+89:    if (screen !== 'QUIZ') return;
+90:
+91:    const handleCopy = (e: ClipboardEvent) => {
+92:      e.preventDefault();
+93:      alert("Copying is disabled during an active exam.");
+94:    };
+95:
+96:    const handleContextMenu = (e: MouseEvent) => {
+97:      e.preventDefault();
+98:      alert("Right-click is disabled during an active exam.");
+99:    };
+100:
+101:    const handleVisibilityChange = () => {
+102:      if (document.visibilityState === 'hidden') {
+103:         alert("Warning: Tab switching/leaving the exam window was detected. This action will be reported.");
+104:      }
+105:    };
+106:
+107:    document.addEventListener('copy', handleCopy);
+108:    document.addEventListener('contextmenu', handleContextMenu);
+109:    document.addEventListener('visibilitychange', handleVisibilityChange);
+110:
+111:    return () => {
+112:      document.removeEventListener('copy', handleCopy);
+113:      document.removeEventListener('contextmenu', handleContextMenu);
+114:      document.removeEventListener('visibilitychange', handleVisibilityChange);
+115:    };
+116:  }, [screen]);
+117:
+118:  const quizData = useMemo(() => {
+119:    try {
+120:       return JSON.parse(exam.quizData || '[]');
+121:    } catch {
+122:       return [];
+123:    }
+124:  }, [exam.quizData]);
+125:
+126:  // Extract questions and config
+127:  const questions = Array.isArray(quizData) ? quizData : quizData.questions || [];
+128:  const passage = !Array.isArray(quizData) ? quizData.passage : '';
+129:
+130:  // library items might define config on the root level
+131:  const rootConfig = {
+132:     totalTime: (exam as any).timeLimit ? (exam as any).timeLimit * 60 : undefined,
+133:     marksCorrect: (exam as any).marksCorrect,
+134:     marksWrong: (exam as any).marksWrong > 0 ? -(exam as any).marksWrong : (exam as any).marksWrong // ensure it's negative or wait, user specifies +2, -0.5 or just 0.5? Usually 0.5 means deduct 0.5.
+135:  };
+136:
+137:  const parsedConfig = (!Array.isArray(quizData) && quizData.config) ? quizData.config : {};
+138:  const config = { 
+139:    totalTime: rootConfig.totalTime ?? 1800, 
+140:    marksCorrect: rootConfig.marksCorrect ?? 2, 
+141:    marksWrong: rootConfig.marksWrong !== undefined ? -Math.abs(rootConfig.marksWrong) : -0.5, 
+142:    ...parsedConfig 
+143:  };
+144:
+145:  const startQuiz = () => {
+146:    setScreen('QUIZ');
+147:    
+148:    // Initialize end time if not present
+149:    let endTime = localStorage.getItem(`quiz_endtime_${exam.id}`);
+150:    if (!endTime) {
+151:       endTime = (Date.now() + config.totalTime * 1000).toString();
+152:       localStorage.setItem(`quiz_endtime_${exam.id}`, endTime);
+153:    }
+154:    
+155:    // Initialize answers if present
+156:    const saved = localStorage.getItem(`quiz_answers_${exam.id}`);
+157:    if (saved) {
+158:      try { setUserAnswers(JSON.parse(saved)); } catch (e) {}
+159:    }
+160:  };
+161:
+162:  useEffect(() => {
+163:     if (screen === 'QUIZ') {
+164:         localStorage.setItem(`quiz_answers_${exam.id}`, JSON.stringify(userAnswers));
+165:     }
+166:  }, [userAnswers, screen, exam.id]);
+167:
+168:  useEffect(() => {
+169:    if (screen === 'QUIZ') {
+170:      const endTimeStr = localStorage.getItem(`quiz_endtime_${exam.id}`);
+171:      if (!endTimeStr) return; // shouldn't happen due to startQuiz
+172:      
+173:      const updateTimer = () => {
+174:         const remaining = Math.max(0, Math.floor((parseInt(endTimeStr) - Date.now()) / 1000));
+175:         setTimeLeft(remaining);
+176:         if (remaining <= 0) {
+177:            handleComplete(userAnswersRef.current);
+178:         }
+179:      };
+180:      
+181:      updateTimer();
+182:      const timer = setInterval(updateTimer, 1000);
+183:      return () => clearInterval(timer);
+184:    }
+185:  }, [screen, exam.id]);
+186:
+187:  const handleComplete = async (answers: Record<number, number>) => {
+188:    setScreen('RESULT');
+189:    // Clear local storage
+190:    localStorage.removeItem(`quiz_endtime_${exam.id}`);
+191:    localStorage.removeItem(`quiz_answers_${exam.id}`);
+192:    // Calculate score
+193:    let score = 0;
+194:    let correct = 0;
+195:    let wrong = 0;
+196:    let skipped = 0;
+197:    
+198:    questions.forEach((q: any, i: number) => {
+199:       if (answers[i] !== undefined) {
+200:         if (answers[i] === q.correctIndex) {
+201:            score += config.marksCorrect;
+202:            correct++;
+203:         } else {
+204:            score += config.marksWrong;
+205:            wrong++;
+206:         }
+207:       } else {
+208:         skipped++;
+209:       }
+210:    });
+211:
+212:    setResultSummary({
+213:       score,
+214:       total: questions.length * config.marksCorrect,
+215:       correct,
+216:       wrong,
+217:       skipped
+218:    });
+219:
+220:    if (user && !isPreview) {
+221:      // expireAt = 24 hours from now — Firebase TTL policy will auto-delete this document
+222:      const expireAt = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
+223:      await addDoc(collection(db, 'results'), {
+224:         studentId: user.uid,
+225:         examId: exam.id,
+226:         examTitle: exam.title,
+227:         score,
+228:         totalPossible: questions.length * config.marksCorrect,
+229:         answers,
+230:         createdAt: serverTimestamp(),
+231:         expireAt: expireAt
+232:      });
+233:    }
+234:  };
+235:
+236:  if (checkingResult) {
+237:     return <div className="p-6 text-center">Checking status...</div>;
+238:  }
+239:
+240:  if (alreadySubmitted) {
+241:     return (
+242:       <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] text-center">
+243:         <h2 className="text-2xl font-black uppercase text-red-600 mb-4">Exam already submitted</h2>
+244:         <p className="mb-6 font-medium">You have already completed this exam.</p>
+245:         <button onClick={onBack} className="bg-zinc-200 dark:bg-zinc-800 font-black uppercase py-4 px-6 border-2 border-zinc-900 dark:border-zinc-100">Return to Dashboard</button>
+246:       </div>
+247:     );
+248:  }
+249:
+250:  if (screen === 'AGREEMENT') {
+251:     return (
+252:        <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-red-600 shadow-[8px_8px_0px_0px_rgba(220,38,38,1)]">
+253:           <h2 className="text-2xl font-black uppercase text-red-600 border-b-2 border-red-600 pb-2 mb-4">Exam Guidelines & Anti-Cheat Agreement</h2>
+254:           <ul className="list-disc pl-5 space-y-2 mb-6 font-medium text-sm">
+255:              <li>Do not switch tabs or leave this window. Doing so will be recorded and may result in disqualification.</li>
+256:              <li>Copy-pasting text is strictly prohibited and disabled.</li>
+257:              <li>Right-clicking context menus are disabled.</li>
+258:              <li>Your screen activity is monitored for the duration of the test.</li>
+259:              <li>A dynamic watermark will display your credentials throughout the exam.</li>
+260:           </ul>
+261:           <label className="flex items-center gap-3 bg-red-50 dark:bg-red-950 p-4 border border-red-200 dark:border-red-900 cursor-pointer">
+262:              <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="w-5 h-5 accent-red-600 text-red-600" />
+263:              <span className="font-bold text-red-900 dark:text-red-100">I agree to abide by the rules and understand the consequences of malpractice.</span>
+264:           </label>
+265:           <div className="mt-6 flex gap-4">
+266:              <button disabled={!agreed} onClick={() => setScreen('LANDING')} className="flex-1 bg-red-600 text-white font-black uppercase py-4 hover:-translate-y-0.5 border-2 border-transparent disabled:opacity-50">Acknowledge</button>
+267:              <button onClick={onBack} className="bg-zinc-200 dark:bg-zinc-800 font-black uppercase py-4 px-6 border-2 border-zinc-900 dark:border-zinc-100">Cancel</button>
+268:           </div>
+269:        </div>
+270:     );
+271:  }
+272:
+273:  if (screen === 'LANDING') {
+274:    const isLocked = timeUntilStart !== null && timeUntilStart > 0;
+275:    
+276:    return (
+277:      <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)]">
+278:        <h2 className="text-2xl font-black uppercase mb-2">{exam.title}</h2>
+279:        <p className="text-zinc-500 mb-6 font-bold">{exam.examType}</p>
+280:        <div className="bg-zinc-100 dark:bg-zinc-800 p-4 border-2 border-zinc-200 dark:border-zinc-700 mb-6">
+281:           <div className="font-mono text-sm">Questions: {questions.length}</div>
+282:           <div className="font-mono text-sm">Time: {Math.floor(config.totalTime / 60)} minutes</div>
+283:           <div className="font-mono text-sm">Marks: +{config.marksCorrect} / {config.marksWrong}</div>
+284:        </div>
+285:
+286:        {isLocked && (
+287:           <div className="bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-500 p-4 mb-6 text-center">
+288:              <div className="font-black text-orange-600 dark:text-orange-400 uppercase mb-1">Exam starts in</div>
+289:              <div className="text-3xl font-mono font-bold text-orange-700 dark:text-orange-300">
+290:                 {timeUntilStart !== null ? 
+291:                    `${Math.floor(timeUntilStart / 3600).toString().padStart(2, '0')}:${Math.floor((timeUntilStart % 3600) / 60).toString().padStart(2, '0')}:${Math.floor(timeUntilStart % 60).toString().padStart(2, '0')}`
+292:                 : '00:00:00'}
+293:              </div>
+294:           </div>
+295:        )}
+296:
+297:        <div className="flex gap-4">
+298:          <button disabled={isLocked} onClick={startQuiz} className="flex-1 bg-emerald-600 text-white font-bold uppercase py-3 border-2 border-transparent hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(4,120,87,1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">Start Quiz</button>
+299:          <button onClick={onBack} className="bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-white font-bold uppercase py-3 px-6 border-2 border-zinc-900 dark:border-zinc-100 hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">Back</button>
+300:        </div>
+301:      </div>
+302:    );
+303:  }
+304:
+305:  return (
+306:    <div className="max-w-4xl mx-auto relative select-none">
+307:       {screen === 'QUIZ' && (
+308:          <div className="pointer-events-none fixed flex flex-col items-center justify-center opacity-[0.03] dark:opacity-[0.05] w-full h-full z-0 transform -rotate-45" style={{ top: 0, left: 0 }}>
+309:             {Array.from({ length: 15 }).map((_, i) => (
+310:                <div key={i} className="text-4xl font-black whitespace-nowrap mb-12">
+311:                   {user?.fullName || user?.displayName} • {user?.email} • {new Date().toISOString().split('T')[0]}
+312:                </div>
+313:             ))}
+314:          </div>
+315:       )}
+316:       
+317:       <div className="bg-zinc-200 dark:bg-zinc-800 p-4 font-black uppercase text-xl sticky top-0 z-10 border-b-4 border-zinc-900 dark:border-zinc-100 flex justify-between relative">
+318:          <div>Time Left: {Math.floor(timeLeft / 3600) > 0 ? `${Math.floor(timeLeft / 3600)}:${Math.floor((timeLeft % 3600) / 60).toString().padStart(2, '0')}:${(timeLeft % 60).toString().padStart(2, '0')}` : `${Math.floor(timeLeft / 60).toString().padStart(2, '0')}:${(timeLeft % 60).toString().padStart(2, '0')}`}</div>
+319:          {exam.examType?.includes('Bilingual') && (
+320:            <select value={lang} onChange={e => setLang(e.target.value)} className="text-sm p-1 ml-4 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border-2 border-zinc-900 dark:border-zinc-100">
+321:               <option value="en">English</option>
+322:               <option value="bn">বাংলা</option>
+323:            </select>
+324:          )}
+325:       </div>
+326:       
+327:       <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+328:          {screen === 'RESULT' && resultSummary && (
+329:             <div className="md:col-span-2 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-600 p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+330:                <div className="text-center md:text-left">
+331:                  <h3 className="text-xl font-black text-blue-900 dark:text-blue-100 uppercase mb-1">Your Score</h3>
+332:                  <div className="text-4xl font-black text-blue-600">{resultSummary.score} <span className="text-xl text-blue-400">/ {resultSummary.total}</span></div>
+333:                </div>
+334:                <div className="flex gap-4 sm:gap-8 justify-center">
+335:                   <div className="text-center">
+336:                      <div className="text-2xl font-black text-emerald-600">{resultSummary.correct}</div>
+337:                      <div className="text-xs font-bold uppercase opacity-60">Correct</div>
+338:                   </div>
+339:                   <div className="text-center">
+340:                      <div className="text-2xl font-black text-red-600">{resultSummary.wrong}</div>
+341:                      <div className="text-xs font-bold uppercase opacity-60">Wrong</div>
+342:                   </div>
+343:                   <div className="text-center">
+344:                      <div className="text-2xl font-black text-zinc-500">{resultSummary.skipped}</div>
+345:                      <div className="text-xs font-bold uppercase opacity-60">Skipped</div>
+346:                   </div>
+347:                </div>
+348:             </div>
+349:          )}
+350:
+351:          {passage && (
+352:             <div className="bg-orange-50/50 dark:bg-amber-950/20 shadow-sm dark:shadow-md border-2 border-orange-200/50 dark:border-amber-900/40 p-4 h-max max-h-[50vh] md:sticky md:top-20 md:max-h-[calc(100vh-120px)] overflow-y-auto rounded-lg rounded-tl-sm rounded-br-sm relative overscroll-none block">
+353:                <div className="absolute top-0 right-0 p-2 opacity-10 blur-sm pointer-events-none w-full h-full overflow-hidden">
+354:                   <div className="text-9xl rotate-[-20deg] text-orange-900 leading-none" style={{ position: 'absolute', right: '-1rem', top: '-1rem' }}>{"\""}</div>
+355:                </div>
+356:                <h3 className="font-black uppercase mb-4 border-b-2 border-orange-200/50 dark:border-amber-900/40 pb-2 text-orange-800 dark:text-orange-200 relative z-10 flex justify-between items-center">
+357:                   <span>Reading Comprehension</span>
+358:                   <span className="text-[10px] bg-orange-200/50 text-orange-800 py-1 px-2 rounded font-bold tracking-widest shrink-0">Passage</span>
+359:                </h3>
+360:                <div className="whitespace-pre-wrap font-serif text-[15px] leading-relaxed text-left sm:text-justify relative z-10 text-zinc-800 dark:text-zinc-200">{passage}</div>
+361:             </div>
+362:          )}
+363:
+364:          <div className={`${passage ? "md:col-span-1" : "md:col-span-2"} flex flex-col gap-6`}>
+365:             {questions.map((q: any, i: number) => {
+366:               const qText = (lang === 'bn' && q.question_bn) ? q.question_bn : (q.question_en || q.question || 'Question ?');
+367:               const opts = (lang === 'bn' && q.options_bn && q.options_bn.length) ? q.options_bn : (q.options_en || q.options || []);
+368:
+369:               return (
+370:                 <div key={i} className="bg-white dark:bg-zinc-900 border-x border-y border-zinc-200 dark:border-zinc-800 p-6 shadow-sm rounded-xl relative overflow-hidden transition-all duration-300 hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50 group">
+371:                    <div className="absolute top-0 left-0 w-1.5 h-full bg-gradient-to-b from-blue-400 to-indigo-600 opacity-50"></div>
+372:                    <div className="flex gap-3 items-start mb-5 overflow-x-auto">
+373:                       <span className="shrink-0 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-black w-8 h-8 flex items-center justify-center rounded-full text-sm shadow-inner shadow-blue-500/20">{i+1}</span>
+374:                       <h4 className="font-bold text-lg whitespace-pre-wrap leading-relaxed text-left sm:text-justify flex-1 text-zinc-800 dark:text-zinc-100 mt-1 min-w-0">{qText}</h4>
+375:                    </div>
+376:                    {q.sentences && (
+377:                       <div className="mb-5 space-y-2 bg-blue-50/50 dark:bg-indigo-950/20 p-4 border border-blue-100 dark:border-indigo-900/50 rounded-lg text-left sm:text-justify text-zinc-700 dark:text-zinc-300 ml-11 overflow-x-auto">
+378:                          {Object.keys(q.sentences).map(k => (
+379:                             <div key={k} className="flex gap-2 text-sm min-w-max sm:min-w-0"><strong className="text-blue-700 dark:text-blue-300">{k}.</strong> <span className="whitespace-pre-wrap">{q.sentences[k]}</span></div>
+380:                          ))}
+381:                       </div>
+382:                    )}
+383:                    <div className="space-y-3">
+384:                       {opts?.map((opt: string, optIdx: number) => {
+385:                          const isSelected = userAnswers[i] === optIdx;
+386:                          let bgClass = "bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700";
+387:                          let borderClass = "border-zinc-300 dark:border-zinc-700";
+388:                          let textClass = "";
+389:
+390:                          if (screen === 'RESULT') {
+391:                             const isCorrect = optIdx === q.correctIndex;
+392:                             if (isCorrect) {
+393:                                bgClass = "bg-emerald-100 dark:bg-emerald-900/50";
+394:                                borderClass = "border-emerald-500 dark:border-emerald-400";
+395:                                textClass = "text-emerald-900 dark:text-emerald-100 font-bold";
+396:                             } else if (isSelected && !isCorrect) {
+397:                                bgClass = "bg-red-100 dark:bg-red-900/50";
+398:                                borderClass = "border-red-500 dark:border-red-400";
+399:                                textClass = "text-red-900 dark:text-red-100 line-through";
+400:                             }
+401:                          } else if (isSelected) {
+402:                             bgClass = "bg-amber-50 dark:bg-amber-900/20";
+403:                             borderClass = "border-amber-500 dark:border-amber-400";
+404:                          }
+405:
+406:                          return (
+407:                            <div 
+408:                              key={optIdx} 
+409:                              onClick={() => {
+410:                                 if (screen === 'QUIZ') {
+411:                                    setUserAnswers(p => {
+412:                                       if (p[i] === optIdx) {
+413:                                          const newP = { ...p };
+414:                                          delete newP[i];
+415:                                          return newP;
+416:                                       }
+417:                                       return { ...p, [i]: optIdx };
+418:                                    });
+419:                                 }
+420:                              }}
+421:                              className={`p-3 border-2 cursor-pointer transition-colors ${bgClass} ${borderClass} flex gap-3 text-sm`}
+422:                            >
+423:                               <span className={`font-black opacity-50 ${textClass || "text-zinc-900 dark:text-zinc-100"}`}>{String.fromCharCode(65 + optIdx)}.</span>
+424:                               <span className={textClass || "text-zinc-900 dark:text-zinc-100"}>{opt}</span>
+425:                            </div>
+426:                          )
+427:                       })}
+428:                    </div>
+429:                    {screen === 'RESULT' && (
+430:                       <div className="mt-4 p-4 bg-zinc-100 dark:bg-zinc-800 border-l-4 border-zinc-500 text-sm">
+431:                          <strong>Explanation:</strong> {(lang === 'bn' && q.explanation_bn) ? q.explanation_bn : (q.explanation_en || 'No explanation provided.')}
+432:                       </div>
+433:                    )}
+434:                 </div>
+435:               )
+436:             })}
+437:
+438:             {screen === 'QUIZ' && (
+439:                <>
+440:                  <button onClick={() => setShowSubmitConfirm(true)} className="w-full bg-blue-600 text-white font-black uppercase py-4 border-2 border-blue-800 hover:-translate-y-0.5 shadow-[4px_4px_0px_0px_rgba(30,58,138,1)]">
+441:                     Submit Quiz
+442:                  </button>
+443:                  
+444:                  {showSubmitConfirm && (
+445:                    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+446:                      <div className="bg-white dark:bg-zinc-900 border-4 border-black dark:border-white shadow-[8px_8px_0px_black] dark:shadow-[8px_8px_0px_white] p-8 max-w-sm w-full text-center">
+447:                        <h2 className="text-xl font-black mb-4 dark:text-white uppercase">Confirm Submission</h2>
+448:                        <p className="mb-6 font-bold text-zinc-700 dark:text-zinc-300">
+449:                          {(() => {
+450:                            const answeredCount = Object.keys(userAnswers).length;
+451:                            const remaining = questions.length - answeredCount;
+452:                            if (remaining > 0) {
+453:                              return `You have ${remaining} question${remaining > 1 ? 's' : ''} remaining. Do you want to submit?`;
+454:                            }
+455:                            return 'You have answered all questions. Do you want to submit?';
+456:                          })()}
+457:                        </p>
+458:                        <div className="flex gap-4">
+459:                          <button onClick={() => setShowSubmitConfirm(false)} className="flex-1 border-4 border-black dark:border-white bg-zinc-200 dark:bg-zinc-800 font-bold uppercase py-3 dark:text-white">
+460:                            No
+461:                          </button>
+462:                          <button onClick={() => { setShowSubmitConfirm(false); handleComplete(userAnswers); }} className="flex-1 border-4 border-black dark:border-white bg-blue-600 text-white font-black uppercase py-3 shadow-[4px_4px_0px_black] dark:shadow-[4px_4px_0px_white] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all">
+463:                            Yes
+464:                          </button>
+465:                        </div>
+466:                      </div>
+467:                    </div>
+468:                  )}
+469:                </>
+470:             )}
+471:             
+472:             {screen === 'RESULT' && (
+473:                <button onClick={onBack} className="w-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-black uppercase py-4 border-2 border-transparent hover:-translate-y-0.5 shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] mt-4">
+474:                   Return to Dashboard
+475:                </button>
+476:             )}
+477:          </div>
+478:       </div>
+479:    </div>
+480:  )
+481:}

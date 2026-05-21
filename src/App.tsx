@@ -754,8 +754,10 @@ function StudentDashboard() {
           }));
 
           assigns.sort(
-            (a, b) =>
-              (b.assignedAt?.toMillis() || 0) - (a.assignedAt?.toMillis() || 0),
+            (a, b) => {
+              const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+              return getMs(b.assignedAt) - getMs(a.assignedAt);
+            }
           );
 
           let sortedAssignedIds = Array.from(
@@ -778,8 +780,10 @@ function StudentDashboard() {
 
             const accessibleFiles = allItems.filter((i) => !i.isFolder);
             accessibleFiles.sort(
-              (a, b) =>
-                (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0),
+              (a, b) => {
+                const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+                return getMs(b.createdAt) - getMs(a.createdAt);
+              }
             );
 
             const eData = accessibleFiles.filter((i) => i.type === "exam");
@@ -805,8 +809,8 @@ function StudentDashboard() {
 
         if (pData.length > 0) {
           pData.sort((a, b) => {
-            if (!a.createdAt || !b.createdAt) return 0;
-            return b.createdAt.toMillis() - a.createdAt.toMillis();
+            const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+            return getMs(b.createdAt) - getMs(a.createdAt);
           });
           const latest = pData[0];
           if (latest.status === "pending") {
