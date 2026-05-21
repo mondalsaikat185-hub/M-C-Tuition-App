@@ -124,7 +124,7 @@ export function StudentLibrary() {
       
       // Add loaded descendants of accessible folders
       const addLoadedChildren = (parentId: string) => {
-          const children = Array.from(libraryCache.values()).filter(i => i.parentId === parentId);
+          const children = Array.from<LibraryItem>(libraryCache.values()).filter(i => i.parentId === parentId);
           for (const c of children) {
               accessible.add(c.id);
               addLoadedChildren(c.id);
@@ -146,12 +146,12 @@ export function StudentLibrary() {
           addAncestors(id);
       }
 
-      const filteredItems = Array.from(libraryCache.values())
+      const filteredItems = Array.from<LibraryItem>(libraryCache.values())
           .filter(i => accessible.has(i.id))
           .map(i => {
               const ownAssign = allAssigns.find(a => a.libraryItemId === i.id);
               if (ownAssign && ownAssign.scheduledStartTime !== undefined) {
-                  return { ...i, scheduledStartTime: ownAssign.scheduledStartTime };
+                  return { ...(i as any), scheduledStartTime: ownAssign.scheduledStartTime };
               }
               return i;
           });
@@ -176,8 +176,8 @@ export function StudentLibrary() {
         const neededRootIds = Array.from(new Set<string>(visibleAssigns.map(a => a.libraryItemId)));
         
         // Use functional state update to ensure we have the very latest cache
-        let currentCache = new Map();
-        setLibraryCache(prev => { currentCache = new Map(prev); return prev; });
+        let currentCache = new Map<string, LibraryItem>();
+        setLibraryCache((prev: Map<string, LibraryItem>) => { currentCache = new Map(prev); return prev; });
         
         const missingIds = neededRootIds.filter(id => !currentCache.has(id));
 

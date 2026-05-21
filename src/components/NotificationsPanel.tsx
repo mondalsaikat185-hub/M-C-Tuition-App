@@ -46,7 +46,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
 
     const fetchNotifs = async () => {
        const snap = await getDocs(q);
-       let notifs = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
+       let notifs = snap.docs.map(doc => ({id: doc.id, ...(doc.data() as any)}));
        if (user.role === 'student') {
           // Client side filter
           notifs = notifs.filter((n: any) => 

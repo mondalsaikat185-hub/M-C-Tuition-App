@@ -16,7 +16,6 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   const [resultSummary, setResultSummary] = useState<{ score: number, total: number, correct: number, wrong: number, skipped: number } | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [timeUntilStart, setTimeUntilStart] = useState<number | null>(null);
-  const scheduledEndTimeRef = useRef<number | null>(null);
 
   // Auto-resume if there is an active valid quiz session in localStorage
   useEffect(() => {
@@ -27,9 +26,19 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
          const startTime = new Date((exam as any).scheduledStartTime).getTime();
          const diff = Math.max(0, Math.floor((startTime - Date.now()) / 1000));
          if (diff > 0) {
-             scheduledEndTimeRef.current = startTime;
              setTimeUntilStart(diff);
-             return;
+             
+             const timer = setInterval(() => {
+                 const remaining = Math.max(0, Math.floor((startTime - Date.now()) / 1000));
+                 if (remaining <= 0) {
+                     setTimeUntilStart(null);
+                     clearInterval(timer);
+                 } else {
+                     setTimeUntilStart(remaining);
+                 }
+             }, 1000);
+             
+             return () => clearInterval(timer);
          }
      }
 
@@ -44,8 +53,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
              try { setUserAnswers(JSON.parse(saved)); } catch (e) {}
            }
         } else {
-           setAgreed(true);
-           setScreen('QUIZ');
+           localStorage.removeItem(`quiz_endtime_${exam.id}`);
+           localStorage.removeItem(`quiz_answers_${exam.id}`);
         }
      }
   }, [exam.id, isPreview]);
@@ -118,28 +127,6 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   const questions = Array.isArray(quizData) ? quizData : quizData.questions || [];
   const passage = !Array.isArray(quizData) ? quizData.passage : '';
 
-  useEffect(() => {
-    if (timeUntilStart === null || timeUntilStart <= 0) return;
-    if (!scheduledEndTimeRef.current) return;
-
-    const timer = setInterval(() => {
-      if (!scheduledEndTimeRef.current) {
-        clearInterval(timer);
-        return;
-      }
-      const remaining = Math.max(0, Math.floor((scheduledEndTimeRef.current - Date.now()) / 1000));
-      if (remaining <= 0) {
-        setTimeUntilStart(null);
-        scheduledEndTimeRef.current = null;
-        clearInterval(timer);
-      } else {
-        setTimeUntilStart(remaining);
-      }
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-  
   // library items might define config on the root level
   const rootConfig = {
      totalTime: (exam as any).timeLimit ? (exam as any).timeLimit * 60 : undefined,
@@ -300,13 +287,9 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
            <div className="bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-500 p-4 mb-6 text-center">
               <div className="font-black text-orange-600 dark:text-orange-400 uppercase mb-1">Exam starts in</div>
               <div className="text-3xl font-mono font-bold text-orange-700 dark:text-orange-300">
-                 {timeUntilStart !== null ? (
-                   <>
-                     {Math.floor(timeUntilStart / 3600).toString().padStart(2, '0')}:
-                     {Math.floor((timeUntilStart % 3600) / 60).toString().padStart(2, '0')}:
-                     {Math.floor(timeUntilStart % 60).toString().padStart(2, '0')}
-                   </>
-                 ) : '00:00:00'}
+                 {timeUntilStart !== null ? 
+                    `${Math.floor(timeUntilStart / 3600).toString().padStart(2, '0')}:${Math.floor((timeUntilStart % 3600) / 60).toString().padStart(2, '0')}:${Math.floor(timeUntilStart % 60).toString().padStart(2, '0')}`
+                 : '00:00:00'}
               </div>
            </div>
         )}
@@ -400,23 +383,24 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
                     <div className="space-y-3">
                        {opts?.map((opt: string, optIdx: number) => {
                           const isSelected = userAnswers[i] === optIdx;
-                          let bgClass = "bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700";
-                          let borderClass = isSelected ? "border-zinc-900 dark:border-zinc-100" : "border-zinc-300 dark:border-zinc-700";
-                          
-                           let textClass = "";
+                          let bgClass = "bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700";
+                          let borderClass = "border-zinc-300 dark:border-zinc-700";
+                          let textClass = "";
 
                           if (screen === 'RESULT') {
                              const isCorrect = optIdx === q.correctIndex;
                              if (isCorrect) {
-                                bgClass = "bg-emerald-100 dark:bg-emerald-900/50 border-emerald-500 font-bold text-emerald-900 dark:text-emerald-100";
-                                textClass = "text-emerald-900 dark:text-emerald-100";
+                                bgClass = "bg-emerald-100 dark:bg-emerald-900/50";
+                                borderClass = "border-emerald-500 dark:border-emerald-400";
+                                textClass = "text-emerald-900 dark:text-emerald-100 font-bold";
                              } else if (isSelected && !isCorrect) {
-                                bgClass = "bg-red-100 dark:bg-red-900/50 border-red-500 text-red-900 dark:text-red-100 line-through";
-                                textClass = "text-red-900 dark:text-red-100";
+                                bgClass = "bg-red-100 dark:bg-red-900/50";
+                                borderClass = "border-red-500 dark:border-red-400";
+                                textClass = "text-red-900 dark:text-red-100 line-through";
                              }
                           } else if (isSelected) {
-                             bgClass = "bg-emerald-50 dark:bg-emerald-900/20";
-                             borderClass = "border-emerald-400 border-dashed dark:border-emerald-500 shadow-[0_0_0_2px_rgba(52,211,153,0.3)]";
+                             bgClass = "bg-amber-50 dark:bg-amber-900/20";
+                             borderClass = "border-amber-500 dark:border-amber-400";
                           }
 
                           return (
