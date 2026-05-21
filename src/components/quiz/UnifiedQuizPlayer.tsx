@@ -16,6 +16,7 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   const [resultSummary, setResultSummary] = useState<{ score: number, total: number, correct: number, wrong: number, skipped: number } | null>(null);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [timeUntilStart, setTimeUntilStart] = useState<number | null>(null);
+  const scheduledEndTimeRef = useRef<number | null>(null);
 
   // Auto-resume if there is an active valid quiz session in localStorage
   useEffect(() => {
@@ -26,6 +27,7 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
          const startTime = new Date((exam as any).scheduledStartTime).getTime();
          const diff = Math.max(0, Math.floor((startTime - Date.now()) / 1000));
          if (diff > 0) {
+             scheduledEndTimeRef.current = startTime;
              setTimeUntilStart(diff);
              return;
          }
@@ -117,19 +119,26 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   const passage = !Array.isArray(quizData) ? quizData.passage : '';
 
   useEffect(() => {
-    if (timeUntilStart !== null && timeUntilStart > 0) {
-      const timer = setInterval(() => {
-        setTimeUntilStart(prev => {
-          if (prev && prev <= 1) {
-             clearInterval(timer);
-             return null;
-          }
-          return prev ? prev - 1 : null;
-        });
-      }, 1000);
-      return () => clearInterval(timer);
-    }
-  }, [timeUntilStart]);
+    if (timeUntilStart === null || timeUntilStart <= 0) return;
+    if (!scheduledEndTimeRef.current) return;
+
+    const timer = setInterval(() => {
+      if (!scheduledEndTimeRef.current) {
+        clearInterval(timer);
+        return;
+      }
+      const remaining = Math.max(0, Math.floor((scheduledEndTimeRef.current - Date.now()) / 1000));
+      if (remaining <= 0) {
+        setTimeUntilStart(null);
+        scheduledEndTimeRef.current = null;
+        clearInterval(timer);
+      } else {
+        setTimeUntilStart(remaining);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
   
   // library items might define config on the root level
   const rootConfig = {
@@ -291,9 +300,13 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
            <div className="bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-500 p-4 mb-6 text-center">
               <div className="font-black text-orange-600 dark:text-orange-400 uppercase mb-1">Exam starts in</div>
               <div className="text-3xl font-mono font-bold text-orange-700 dark:text-orange-300">
-                 {Math.floor(timeUntilStart / 3600).toString().padStart(2, '0')}:
-                 {Math.floor((timeUntilStart % 3600) / 60).toString().padStart(2, '0')}:
-                 {Math.floor(timeUntilStart % 60).toString().padStart(2, '0')}
+                 {timeUntilStart !== null ? (
+                   <>
+                     {Math.floor(timeUntilStart / 3600).toString().padStart(2, '0')}:
+                     {Math.floor((timeUntilStart % 3600) / 60).toString().padStart(2, '0')}:
+                     {Math.floor(timeUntilStart % 60).toString().padStart(2, '0')}
+                   </>
+                 ) : '00:00:00'}
               </div>
            </div>
         )}

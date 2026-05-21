@@ -24,6 +24,8 @@ export interface LibraryItem {
   timeLimit?: number;
   marksCorrect?: number;
   marksWrong?: number;
+  allowMultipleAttempts?: boolean;
+  scheduledStartTime?: string;
   createdAt?: any;
   isChunked?: boolean;
   chunkCount?: number;
@@ -93,7 +95,6 @@ export function AdminLibrary() {
   const [marksCorrect, setMarksCorrect] = useState(1);
   const [marksWrong, setMarksWrong] = useState(0.25);
   const [allowMultipleAttempts, setAllowMultipleAttempts] = useState(false);
-  const [scheduledStartTime, setScheduledStartTime] = useState('');
   // Note extra
   const [linkUrl, setLinkUrl] = useState('');
   const [contentUrl, setContentUrl] = useState('');
@@ -381,9 +382,6 @@ export function AdminLibrary() {
            payload.marksCorrect = marksCorrect;
            payload.marksWrong = marksWrong;
            payload.allowMultipleAttempts = allowMultipleAttempts;
-           if (scheduledStartTime) {
-              payload.scheduledStartTime = scheduledStartTime;
-           }
            await addDoc(collection(db, 'library'), payload);
            setIsUploadModalOpen(false);
            resetForm();
@@ -558,11 +556,20 @@ export function AdminLibrary() {
 
   // Share logic
   const [currentSharedBatchIds, setCurrentSharedBatchIds] = useState<string[]>([]);
+  const [shareBatchSettings, setShareBatchSettings] = useState<Record<string, { scheduledStartTime?: string }>>({});
   
   const openShareModal = (item: LibraryItem) => {
      setSelectedItem(item);
-     const alreadyAssigned = assignments.filter(a => a.libraryItemId === item.id).map(a => a.batchId);
-     setCurrentSharedBatchIds(alreadyAssigned);
+     const alreadyAssigned = assignments.filter(a => a.libraryItemId === item.id);
+     const batchIds = alreadyAssigned.map(a => a.batchId);
+     const settingsList: Record<string, { scheduledStartTime?: string }> = {};
+     alreadyAssigned.forEach(a => {
+         if (a.scheduledStartTime) {
+             settingsList[a.batchId] = { scheduledStartTime: a.scheduledStartTime };
+         }
+     });
+     setCurrentSharedBatchIds(batchIds);
+     setShareBatchSettings(settingsList);
      setIsShareModalOpen(true);
   };
 
@@ -570,6 +577,13 @@ export function AdminLibrary() {
      setCurrentSharedBatchIds(p => 
         p.includes(batchId) ? p.filter(x => x !== batchId) : [...p, batchId]
      );
+  };
+
+  const updateShareSetting = (batchId: string, scheduledStartTime: string) => {
+     setShareBatchSettings(prev => ({
+         ...prev,
+         [batchId]: { ...prev[batchId], scheduledStartTime }
+     }));
   };
 
   const handleSaveShare = async () => {
@@ -580,10 +594,16 @@ export function AdminLibrary() {
         
         const batchFn = writeBatch(db);
         
-        // Remove ones that are no longer selected
+        // Update/Remove existing
         for (const a of previouslyAssigned) {
            if (!currentSharedBatchIds.includes(a.batchId)) {
               batchFn.delete(doc(db, 'batchAssignments', a.id));
+           } else {
+              // Update scheduledStartTime if changed
+              const newTime = shareBatchSettings[a.batchId]?.scheduledStartTime || '';
+              if (a.scheduledStartTime !== newTime) {
+                 batchFn.update(doc(db, 'batchAssignments', a.id), { scheduledStartTime: newTime || null });
+              }
            }
         }
         
@@ -596,7 +616,8 @@ export function AdminLibrary() {
                  libraryItemId: selectedItem.id,
                  batchId: bId,
                  assignedAt: serverTimestamp(),
-                 assignedBy: user?.uid
+                 assignedBy: user?.uid,
+                 scheduledStartTime: shareBatchSettings[bId]?.scheduledStartTime || null
               });
            }
         }
@@ -1025,12 +1046,6 @@ export function AdminLibrary() {
                          Allow Students to Re-take Exam Multiple Times
                        </label>
 
-                       <div className="bg-orange-50 dark:bg-orange-900/20 p-3 border-2 border-orange-500">
-                         <label className="block text-xs font-bold uppercase mb-1 text-orange-800 dark:text-orange-200">Scheduled Start Time (Optional Lockdown)</label>
-                         <input type="datetime-local" value={scheduledStartTime} onChange={e => setScheduledStartTime(e.target.value)} className="w-full border-2 border-orange-800/50 p-2 bg-transparent text-sm" />
-                         <p className="text-xs mt-1 text-orange-700/80">If set, the exam will be visible but locked until this time.</p>
-                       </div>
-
                        <div>
                          <label className="block text-xs font-bold uppercase mb-1 text-emerald-600 dark:text-emerald-400">1. Auto-extract via JS/HTML/JSON Upload</label>
                          <input type="file" accept=".js,.html,.json" onChange={handleFileExtraction} className="text-sm w-full file:mr-4 file:py-2 file:px-4 file:border-2 file:border-zinc-900 dark:file:border-zinc-100 file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-900 dark:file:text-white file:font-bold file:uppercase file:text-xs" />
@@ -1097,15 +1112,28 @@ export function AdminLibrary() {
                <div className="space-y-2 mb-6 max-h-60 overflow-y-auto border border-zinc-200 dark:border-zinc-800 p-2">
                   {batches.length === 0 ? <div className="text-sm text-center">No batches found</div> : null}
                   {batches.map(b => (
-                     <label key={b.id} className="flex items-center gap-3 p-2 bg-zinc-50 dark:bg-zinc-800/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer border-b border-zinc-200 dark:border-zinc-700 last:border-0 border-2 border-transparent">
-                        <input 
-                           type="checkbox" 
-                           checked={currentSharedBatchIds.includes(b.id)}
-                           onChange={() => toggleBatchShare(b.id)}
-                           className="w-5 h-5 accent-emerald-600 cursor-pointer"
-                        />
-                        <span className="font-bold">{b.name}</span>
-                     </label>
+                     <div key={b.id} className="bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700 last:border-0 border-2 border-transparent">
+                        <label className="flex items-center gap-3 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer">
+                           <input 
+                              type="checkbox" 
+                              checked={currentSharedBatchIds.includes(b.id)}
+                              onChange={() => toggleBatchShare(b.id)}
+                              className="w-5 h-5 accent-emerald-600 cursor-pointer"
+                           />
+                           <span className="font-bold cursor-pointer">{b.name}</span>
+                        </label>
+                        {currentSharedBatchIds.includes(b.id) && selectedItem.type === 'exam' && (
+                           <div className="pl-10 pr-2 pb-2">
+                              <label className="text-xs font-bold text-zinc-500 uppercase mb-1 block">Scheduled Start Time</label>
+                              <input 
+                                 type="datetime-local" 
+                                 value={shareBatchSettings[b.id]?.scheduledStartTime || ''} 
+                                 onChange={e => updateShareSetting(b.id, e.target.value)} 
+                                 className="w-full text-xs p-1 border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900"
+                              />
+                           </div>
+                        )}
+                     </div>
                   ))}
                </div>
 
