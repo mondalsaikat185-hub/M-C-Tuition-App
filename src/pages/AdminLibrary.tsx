@@ -109,27 +109,29 @@ export function AdminLibrary() {
   const [autoExtractMsg, setAutoExtractMsg] = useState('');
 
   useEffect(() => {
-    fetchLibrary();
     fetchBatches();
     fetchAssignments();
-  }, []);
-
-  const fetchLibrary = async () => {
-    try {
-      setLoading(true);
-      const q = query(collection(db, 'library'));
-      const snap = await getDocs(q);
+    
+    // onSnapshot is much better here because it uses local indexedDB cache instantly
+    // and only charges read quotas for records that changed since the last fetch.
+    const q = query(collection(db, 'library'));
+    const unsubscribe = onSnapshot(q, (snap) => {
       const data: LibraryItem[] = [];
       snap.forEach(d => data.push({ id: d.id, ...d.data() } as LibraryItem));
       const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
       data.sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
       setItems(data);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, 'library');
-    } finally {
       setLoading(false);
-    }
-  };
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'library');
+      setLoading(false);
+    });
+    
+    return () => unsubscribe();
+  }, []);
+
+  // Remove the old manual fetchLibrary function entirely
+  // const fetchLibrary = async () => { ... } is replaced by the onSnapshot inside useEffect
 
   const fetchBatches = async () => {
     try {
@@ -313,9 +315,7 @@ export function AdminLibrary() {
        });
        setIsFolderModalOpen(false);
        setFolderName('');
-       fetchLibrary();
      } catch (err: any) {
-       alert("Operation failed: " + (err.message || String(err)));
        handleFirestoreError(err, OperationType.CREATE, 'library');
      } finally {
        setSubmitting(false);
@@ -386,7 +386,6 @@ export function AdminLibrary() {
            await addDoc(collection(db, 'library'), payload);
            setIsUploadModalOpen(false);
            resetForm();
-           fetchLibrary();
            setSubmitting(false);
            return;
         }
@@ -423,22 +422,21 @@ export function AdminLibrary() {
                 
                 const docRef = await addDoc(collection(db, 'library'), payload);
                 
-                // Write chunks
-                for (let i = 0; i < numChunks; i++) {
+                // Write chunks in parallel
+                const chunkPromises = Array.from({ length: numChunks }, (_, i) => {
                    const chunkData = base64String.substring(i * chunkSize, (i + 1) * chunkSize);
-                   await setDoc(doc(db, 'libraryChunks', `${docRef.id}_${i}`), {
+                   return setDoc(doc(db, 'libraryChunks', `${docRef.id}_${i}`), {
                       libraryId: docRef.id,
                       chunkIndex: i,
                       data: chunkData
                    });
-                }
+                });
+                await Promise.all(chunkPromises);
                 
                 setIsUploadModalOpen(false);
                 resetForm();
-                fetchLibrary();
                 setSubmitting(false);
               } catch (err: any) {
-                 alert("Upload failed: " + (err.message || String(err)));
                  handleFirestoreError(err, OperationType.CREATE, 'libraryChunks');
                  setSubmitting(false);
               }
@@ -453,12 +451,10 @@ export function AdminLibrary() {
            await addDoc(collection(db, 'library'), payload);
            setIsUploadModalOpen(false);
            resetForm();
-           fetchLibrary();
            setSubmitting(false);
         }
 
      } catch (err: any) {
-        alert("Operation failed: " + (err.message || String(err)));
         handleFirestoreError(err, OperationType.CREATE, 'library');
         setSubmitting(false);
      }
@@ -527,7 +523,6 @@ export function AdminLibrary() {
        }
        await commitBatch();
        
-       fetchLibrary();
        fetchAssignments();
        setDeleteItemId(null);
      } catch (err: any) {
@@ -546,7 +541,6 @@ export function AdminLibrary() {
         await setDoc(doc(db, 'library', editItemId), { title: editItemTitle.trim() }, { merge: true });
         setEditItemId(null);
         setEditItemTitle('');
-        fetchLibrary();
      } catch (err: any) {
         alert("Error updating: " + String(err.message || err));
      } finally {
@@ -662,7 +656,6 @@ export function AdminLibrary() {
      try {
         setSubmitting(true);
         await updateDoc(doc(db, 'library', item.id), { allowMultipleAttempts: !(item as any).allowMultipleAttempts });
-        fetchLibrary();
      } catch (err) {
         alert("Toggle failed: " + String(err));
      } finally {
@@ -744,13 +737,6 @@ export function AdminLibrary() {
            backTo="/admin" 
            onBack={currentFolderId ? handleBackNavigation : undefined} 
         />
-        <button 
-           onClick={() => fetchLibrary()} 
-           disabled={loading}
-           className="bg-black dark:bg-zinc-100 text-white dark:text-black font-bold uppercase text-xs px-4 py-2 border-2 border-transparent hover:-translate-y-0.5 transition-transform disabled:opacity-50"
-        >
-           {loading ? '...' : 'Refresh'}
-        </button>
       </div>
       
       {!activeSession && activeSessionsList.length > 0 && (

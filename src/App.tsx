@@ -192,7 +192,7 @@ import { NotificationsPanel } from "./components/NotificationsPanel";
 
 function TopNav() {
   const { theme, setTheme } = useTheme();
-  const { user, signOut } = useAuth();
+  const { user, signOut, updateLocalUser } = useAuth();
   const [showDropdown, setShowDropdown] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
@@ -207,7 +207,7 @@ function TopNav() {
 
     const fetchUnread = async () => {
       try {
-        const q = query(collection(db, "notifications"), limit(100));
+        const q = query(collection(db, "notifications"), limit(20));
         const snap = await getDocs(q);
         let notifs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         if (user.role === "student") {
@@ -249,8 +249,10 @@ function TopNav() {
         fullName: editName,
         address: editAddress,
       });
-      // Note: AuthProvider now uses getDoc (not onSnapshot). Profile changes
-      // (fullName, address) will require a page reload to be reflected in the UI.
+      updateLocalUser({
+        displayName: editName,
+        address: editAddress
+      } as any);
       setShowEditProfile(false);
       window.dispatchEvent(
         new CustomEvent("show-custom-alert", {
@@ -722,81 +724,17 @@ function StudentDashboard() {
     }
 
     if (user && (user as any).pendingMonths > 0) {
-      setPaymentStatus({
-        status: "pending",
-        label: "Payment Pending",
-        color: "text-red-600 dark:text-red-400",
-      });
-    } else {
-      setPaymentStatus({
-        status: "paid",
-        label: "All Paid Up",
-        color: "text-emerald-600 dark:text-emerald-400",
-      });
+        // Pending months check moved to second useEffect to prevent flashing
     }
   }, [user]);
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      if (!user) return;
+    if (!user?.uid) return;
 
+    let unsubAssign: (() => void) | null = null;
+
+    const fetchPayment = async () => {
       try {
-        // Fetch recent items from library via assignments
-        if (user.batchId) {
-          const assignQ = query(
-            collection(db, "batchAssignments"),
-            where("batchId", "==", user.batchId),
-          );
-          const assignSnaps = await getDocs(assignQ);
-          const assigns = assignSnaps.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as any),
-          }));
-
-          assigns.sort(
-            (a, b) => {
-              const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
-              return getMs(b.assignedAt) - getMs(a.assignedAt);
-            }
-          );
-
-          let sortedAssignedIds = Array.from(
-            new Set(assigns.map((a) => a.libraryItemId)),
-          );
-          // Take top 20 assigned items to save reads.
-          const targetIds = sortedAssignedIds.slice(0, 20);
-
-          if (targetIds.length > 0) {
-            const allItems: any[] = [];
-            for (let i = 0; i < targetIds.length; i += 10) {
-              const chunk = targetIds.slice(i, i + 10);
-              const libQ = query(
-                collection(db, "library"),
-                where("__name__", "in", chunk),
-              );
-              const libSnaps = await getDocs(libQ);
-              libSnaps.forEach((d) => allItems.push({ id: d.id, ...d.data() }));
-            }
-
-            const accessibleFiles = allItems.filter((i) => !i.isFolder);
-            accessibleFiles.sort(
-              (a, b) => {
-                const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
-                return getMs(b.createdAt) - getMs(a.createdAt);
-              }
-            );
-
-            const eData = accessibleFiles.filter((i) => i.type === "exam");
-            const nData = accessibleFiles.filter(
-              (i) => i.type === "note" || i.type === "pdf",
-            );
-
-            setExams(eData.slice(0, 3));
-            setNotes(nData.slice(0, 5));
-          }
-        }
-
-        // Fetch latest payment
         const payQ = query(
           collection(db, "payments"),
           where("studentId", "==", user.uid),
@@ -825,6 +763,12 @@ function StudentDashboard() {
               label: "Rejected",
               color: "text-red-600 dark:text-red-400",
             });
+          } else if ((user as any).pendingMonths > 0) {
+            setPaymentStatus({
+              status: "pending",
+              label: "Payment Pending",
+              color: "text-red-600 dark:text-red-400",
+            });
           } else {
             setPaymentStatus({
               status: "paid",
@@ -832,13 +776,79 @@ function StudentDashboard() {
               color: "text-emerald-600 dark:text-emerald-400",
             });
           }
+        } else {
+          if ((user as any).pendingMonths > 0) {
+            setPaymentStatus({
+              status: "pending",
+              label: "Payment Pending",
+              color: "text-red-600 dark:text-red-400",
+            });
+          }
         }
       } catch (error) {
         console.error("Dashboard fetch error:", error);
       }
     };
-    fetchDashboardData();
-  }, [user]);
+    fetchPayment();
+
+    if (user.batchId) {
+      try {
+        const assignQ = query(
+          collection(db, "batchAssignments"),
+          where("batchId", "==", user.batchId),
+        );
+        
+        unsubAssign = onSnapshot(assignQ, async (assignSnaps) => {
+           const assigns = assignSnaps.docs.map((d) => ({
+             id: d.id,
+             ...(d.data() as any),
+           }));
+           assigns.sort(
+             (a, b) => {
+               const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+               return getMs(b.assignedAt) - getMs(a.assignedAt);
+             }
+           );
+ 
+           let sortedAssignedIds = Array.from(
+             new Set(assigns.map((a) => a.libraryItemId)),
+           );
+           const targetIds = sortedAssignedIds.slice(0, 20);
+           if (targetIds.length > 0) {
+             const allItems: any[] = [];
+             for (let i = 0; i < targetIds.length; i += 10) {
+               const chunk = targetIds.slice(i, i + 10);
+               const libQ = query(
+                 collection(db, "library"),
+                 where("__name__", "in", chunk),
+               );
+               const libSnaps = await getDocs(libQ);
+               libSnaps.forEach((d) => allItems.push({ id: d.id, ...d.data() }));
+             }
+             const accessibleFiles = allItems.filter((i) => !i.isFolder);
+             accessibleFiles.sort(
+               (a, b) => {
+                 const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+                 return getMs(b.createdAt) - getMs(a.createdAt);
+               }
+             );
+             const eData = accessibleFiles.filter((i) => i.type === "exam");
+             const nData = accessibleFiles.filter(
+               (i) => i.type === "note" || i.type === "pdf",
+             );
+             setExams(eData.slice(0, 3));
+             setNotes(nData.slice(0, 5));
+           }
+        });
+      } catch (error) {
+        console.error("Dashboard assignments fetch error:", error);
+      }
+    }
+
+    return () => {
+      if (unsubAssign) unsubAssign();
+    };
+  }, [user?.uid, user?.batchId]);
 
   if (user?.status === "pending") {
     return (
@@ -941,7 +951,7 @@ function StudentDashboard() {
               </div>
               <div>
                 <span className="font-bold text-zinc-500 uppercase text-xs block">
-                  Joined Data:
+                  Joined Date:
                 </span>{" "}
                 <div className="font-bold">{user?.joinDate || "N/A"}</div>
               </div>
@@ -1333,17 +1343,22 @@ export default function App() {
   const { quotaError } = useAuth();
 
   if (quotaError) {
+    const isQuotaError = quotaError?.includes('লিমিট') || quotaError?.includes('Quota');
+    const errorTitle = isQuotaError ? 'Database Limit Reached' : 'Connection Error';
+
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
         <div className="bg-white dark:bg-zinc-900 border-4 border-red-600 p-8 max-w-md shadow-[8px_8px_0px_0px_rgba(220,38,38,1)]">
-          <h1 className="text-2xl font-black text-red-600 uppercase mb-4">Database Limit Reached</h1>
+          <h1 className="text-2xl font-black text-red-600 uppercase mb-4">{errorTitle}</h1>
           <p className="font-bold text-zinc-700 dark:text-zinc-300 mb-6 text-sm whitespace-pre-wrap leading-relaxed">
             {quotaError}
           </p>
-          <p className="text-xs font-bold text-zinc-500 mb-6">
-            Firebase free tier daily read limit has been exhausted (50,000 reads). 
-            This limit resets daily at 12:00 AM Pacific Time.
-          </p>
+          {isQuotaError && (
+            <p className="text-xs font-bold text-zinc-500 mb-6">
+              Firebase free tier daily read limit has been exhausted (50,000 reads). 
+              This limit resets daily at 12:00 AM Pacific Time.
+            </p>
+          )}
           <button 
              onClick={() => window.location.reload()}
              className="w-full bg-red-600 text-white font-black uppercase py-3 hover:-translate-y-1 transition-transform border-2 border-red-600"

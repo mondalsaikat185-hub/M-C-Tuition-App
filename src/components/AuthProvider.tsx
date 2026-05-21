@@ -44,6 +44,7 @@ interface AuthContextType {
   user: AppUser | null;
   loading: boolean;
   quotaError: string | null;
+  updateLocalUser: (updates: Partial<AppUser>) => void;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -53,6 +54,7 @@ export const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   quotaError: null,
+  updateLocalUser: () => {},
   signInWithGoogle: async () => {},
   signOut: async () => {},
 });
@@ -65,9 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [quotaError, setQuotaError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let docUnsubscribe: (() => void) | null = null;
+  const updateLocalUser = (updates: Partial<AppUser>) => {
+    setUser((prev) => prev ? { ...prev, ...updates } : null);
+  };
 
+  useEffect(() => {
     // Check for redirect results first
     getRedirectResult(auth).then((result) => {
        if (result) {
@@ -223,7 +227,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ fbUser, user, loading, quotaError, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ fbUser, user, loading, quotaError, updateLocalUser, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );

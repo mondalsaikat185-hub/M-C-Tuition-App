@@ -110,6 +110,64 @@ export function AdminStudents() {
   }, [activeBatchTab, batches.length]);
 
   useEffect(() => {
+    if (!students.length) return;
+
+    const fetchMarksAndAbsent = async () => {
+      try {
+        const newStudentMarks: Record<string, {marks: string, examTitle: string}[]> = {};
+        const newAbsentCount: Record<string, number> = {};
+
+        // Query all results in last X days or simply all relevant results?
+        // We'll fetch results for these students. Let's optimize by fetching all result documents and matching them.
+        // For absence count, we need 3 consecutive absences. A simple way:
+        const resultsSnap = await getDocs(collection(db, 'results'));
+        const allResults: any[] = [];
+        resultsSnap.forEach(r => allResults.push({ id: r.id, ...r.data() }));
+
+        const threeDaysAgo = new Date();
+        threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+        const threeDaysAgoMs = threeDaysAgo.getTime();
+
+        students.forEach(s => {
+          newAbsentCount[s.uid] = 0;
+          
+          // Calculate absent count
+          const sBatchAtt = attendanceData[s.batchId!] || [];
+          let recentAbsences = 0;
+          for (let i = 0; i < Math.min(3, sBatchAtt.length); i++) {
+             if (!sBatchAtt[i].presentStudentIds.includes(s.uid)) {
+                recentAbsences++;
+             } else {
+                break; // they were present recently
+             }
+          }
+          newAbsentCount[s.uid] = recentAbsences;
+        });
+
+        // Calculate marks by date
+        // results have `createdAt` but attendance has `date` (YYYY-MM-DD).
+        // Let's map results to date string.
+        allResults.forEach(r => {
+           if (r.createdAt && r.studentId) {
+              const rDate = r.createdAt.toDate();
+              const dateStr = rDate.toISOString().split('T')[0];
+              const key = `${r.studentId}_${dateStr}`;
+              if (!newStudentMarks[key]) newStudentMarks[key] = [];
+              const scoreText = r.score !== undefined && r.totalPossible !== undefined ? `${r.score}/${r.totalPossible}` : String(r.score);
+              newStudentMarks[key].push({ marks: scoreText, examTitle: r.examTitle || 'Exam' });
+           }
+        });
+
+        setStudentMarks(newStudentMarks);
+        setStudentAbsentCount(newAbsentCount);
+      } catch (err) {
+        console.error("fetchMarksAndAbsent error", err);
+      }
+    };
+    fetchMarksAndAbsent();
+  }, [students, attendanceData]);
+
+  useEffect(() => {
     const fetchData = async () => {
       try {
         const [studentsSnap, batchesSnap] = await Promise.all([
@@ -1031,248 +1089,6 @@ export interface Exam {
   quizData?: string; // Stored JSON payload for interactive quizzes
   batchId: string;
   createdAt?: any;
-}
-
-export function AdminExams() {
-  const [exams, setExams] = useState<Exam[]>([]);
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [confirmDeleteExamId, setConfirmDeleteExamId] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
-  const [examDate, setExamDate] = useState('');
-  const [examType, setExamType] = useState<ExamType>('Online Link');
-  const [contentUrl, setContentUrl] = useState('');
-  const [analysisUrl, setAnalysisUrl] = useState('');
-  const [quizDataStr, setQuizDataStr] = useState('');
-  const [batchId, setBatchId] = useState('');
-
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [examsSnap, batchesSnap] = await Promise.all([
-        getDocs(collection(db, 'exams')),
-        getDocs(collection(db, 'batches'))
-      ]);
-      
-      const examsData: Exam[] = [];
-      examsSnap.forEach((doc) => {
-        examsData.push({ id: doc.id, ...doc.data() } as Exam);
-      });
-      setExams(examsData);
-
-      const batchesData: Batch[] = [];
-      batchesSnap.forEach((doc) => {
-        batchesData.push({ id: doc.id, ...doc.data() } as Batch);
-      });
-      setBatches(batchesData);
-      
-      if (batchesData.length > 0 && !batchId) {
-        setBatchId(batchesData[0].id);
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'exams / batches');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const handleAddExam = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !examDate || !batchId) return;
-    try {
-      setLoading(true);
-      const newExam: any = {
-        title,
-        examDate,
-        examType,
-        batchId,
-        createdAt: serverTimestamp()
-      };
-      if (contentUrl) newExam.contentUrl = contentUrl;
-      if (analysisUrl) newExam.analysisUrl = analysisUrl;
-      if (quizDataStr) newExam.quizData = quizDataStr;
-      
-      await addDoc(collection(db, 'exams'), newExam);
-      setTitle('');
-      setExamDate('');
-      setContentUrl('');
-      setAnalysisUrl('');
-      setQuizDataStr('');
-      setExamType('Online Link');
-      await fetchData();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'exams');
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteExam = async (id: string) => {
-    try {
-      setLoading(true);
-      await deleteDoc(doc(db, 'exams', id));
-      await fetchData();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `exams/${id}`);
-      setLoading(false);
-    }
-  };
-
-  const getBatchName = (id: string) => batches.find(b => b.id === id)?.name || 'Unknown Batch';
-
-  return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto flex flex-col h-full w-full">
-      <PageHeader title="Exam Engine" backTo="/admin" />
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-1 bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)]">
-          <h3 className="font-black uppercase mb-4">Create Exam</h3>
-          <form onSubmit={handleAddExam} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-bold uppercase mb-1">Select Batch</label>
-              <select
-                value={batchId}
-                onChange={e => setBatchId(e.target.value)}
-                className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none"
-              >
-                {batches.map(b => (
-                  <option key={b.id} value={b.id} className="text-zinc-900">{b.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold uppercase mb-1">Exam Title</label>
-              <input 
-                type="text" 
-                value={title} 
-                onChange={e => setTitle(e.target.value)} 
-                className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none"
-                placeholder="e.g. Unit Test 1"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold uppercase mb-1">Date & Time</label>
-              <input 
-                type="datetime-local" 
-                value={examDate} 
-                onChange={e => setExamDate(e.target.value)} 
-                className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold uppercase mb-1">Exam Type</label>
-              <select
-                value={examType}
-                onChange={e => setExamType(e.target.value as ExamType)}
-                className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none"
-              >
-                <option value="Online Link" className="text-zinc-900">Online Link (Form)</option>
-                <option value="PDF Upload" className="text-zinc-900">PDF Upload (Offline/Subjective)</option>
-                <option value="Cloze Test" className="text-zinc-900">Interactive: Cloze Test</option>
-                <option value="Error Correction" className="text-zinc-900">Interactive: Error Correction</option>
-                <option value="Parajumble" className="text-zinc-900">Interactive: Parajumble</option>
-                <option value="Comprehension" className="text-zinc-900">Interactive: Comprehension</option>
-                <option value="Bilingual MCQ" className="text-zinc-900">Interactive: GK/Math/Reasoning</option>
-              </select>
-            </div>
-            
-            {['Cloze Test', 'Error Correction', 'Parajumble', 'Comprehension', 'Bilingual MCQ'].includes(examType) ? (
-               <div>
-                 <label className="block text-xs font-bold uppercase mb-1">Quiz JSON Data</label>
-                 <textarea 
-                   rows={6}
-                   value={quizDataStr} 
-                   onChange={e => setQuizDataStr(e.target.value)} 
-                   className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none font-mono text-xs"
-                   placeholder='Paste window.__PREPARSED_JSON__ payload here...'
-                 />
-                 <p className="text-[10px] opacity-70 mt-1">Format: Copy the JSON array/object from the provided exam HTML files.</p>
-               </div>
-            ) : (
-                <>
-                  <div>
-                    <label className="block text-xs font-bold uppercase mb-1">Exam Link / Paper Link</label>
-                    <input 
-                      type="url" 
-                      value={contentUrl} 
-                      onChange={e => setContentUrl(e.target.value)} 
-                      className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none"
-                      placeholder="Google Form / Drive PDF Link"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase mb-1">Result Analysis / Answer Key Link</label>
-                    <input 
-                      type="url" 
-                      value={analysisUrl} 
-                      onChange={e => setAnalysisUrl(e.target.value)} 
-                      className="w-full border-2 border-zinc-900 dark:border-zinc-100 p-2 bg-transparent focus:outline-none"
-                      placeholder="Link to Analysis or Answers (Optional)"
-                    />
-                  </div>
-                </>
-            )}
-            <button type="submit" disabled={loading || !title || !examDate || !batchId} className="mt-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-bold uppercase text-xs px-4 py-3 flex justify-center items-center gap-2 hover:-translate-y-0.5 transition-transform border-2 border-transparent disabled:opacity-50 shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] dark:shadow-[4px_4px_0px_0px_rgba(82,82,91,1)]">
-              <Plus className="w-4 h-4" /> Add Exam
-            </button>
-          </form>
-        </div>
-        
-        <div className="md:col-span-2 bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-6 shadow-[6px_6px_0px_0px_rgba(24,24,27,1)] dark:shadow-[6px_6px_0px_0px_rgba(244,244,245,1)] overflow-x-auto w-full">
-          <h3 className="font-black uppercase mb-4">Scheduled Exams</h3>
-          {loading ? (
-            <div className="flex justify-center p-8"><Loader2 className="animate-spin w-8 h-8 text-zinc-500" /></div>
-          ) : (
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b-2 border-zinc-900 dark:border-zinc-100">
-                  <th className="p-2 font-bold uppercase text-xs">Title & Type</th>
-                  <th className="p-2 font-bold uppercase text-xs">Batch</th>
-                  <th className="p-2 font-bold uppercase text-xs">Date</th>
-                  <th className="p-2 font-bold uppercase text-xs text-right">Delete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {exams.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="p-4 text-center text-zinc-500 font-medium">No exams scheduled yet.</td>
-                  </tr>
-                )}
-                {exams.map((exam) => (
-                  <tr key={exam.id} className="border-b border-zinc-200 dark:border-zinc-800">
-                    <td className="p-2">
-                      <div className="font-bold">{exam.title}</div>
-                      <div className="text-[10px] uppercase font-bold text-zinc-500">{exam.examType || 'Online Link'}</div>
-                      {exam.analysisUrl && <a href={exam.analysisUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 hover:underline uppercase font-bold block mt-1">View Analysis</a>}
-                    </td>
-                    <td className="p-2 text-sm">{getBatchName(exam.batchId)}</td>
-                    <td className="p-2 text-sm text-zinc-500 dark:text-zinc-400">{exam.examDate}</td>
-                    <td className="p-2 text-right flex justify-end items-center gap-2">
-                       <Link to={`/admin/results/${exam.id}`} className="p-1 px-2 text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 font-bold uppercase hover:bg-blue-200">
-                          Results
-                       </Link>
-                      {confirmDeleteExamId === exam.id ? (
-                        <div className="flex gap-1">
-                          <button onClick={() => { handleDeleteExam(exam.id); setConfirmDeleteExamId(null); }} className="p-1 px-3 bg-red-600 text-white font-bold uppercase text-[10px]">Yes</button>
-                          <button onClick={() => setConfirmDeleteExamId(null)} className="p-1 px-3 bg-zinc-200 text-black font-bold uppercase text-[10px]">No</button>
-                        </div>
-                      ) : (
-                        <button onClick={() => setConfirmDeleteExamId(exam.id)} className="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900 rounded">
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export interface Payment {

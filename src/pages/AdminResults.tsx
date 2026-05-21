@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, orderBy, where, deleteDoc, doc, writeBatch, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, where, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { PageHeader } from './Pages';
 import { Loader2, Trash2, Search } from 'lucide-react';
@@ -21,11 +21,12 @@ export function AdminResults() {
   const [tab, setTab] = useState<'latest' | 'student' | 'exam'>('latest');
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Maintain user cache outside useEffect so the second one can use it
+  const userDictRef = useRef<Record<string, any>>({});
+
   useEffect(() => {
-    const fetchInitialData = async () => {
+    const init = async () => {
       try {
-        setLoading(true);
-        
         const bSnap = await getDocs(collection(db, 'batches'));
         const bData: any[] = [];
         bSnap.forEach(d => bData.push({ id: d.id, ...d.data() }));
@@ -42,7 +43,13 @@ export function AdminResults() {
               batchId: d.data().batchId
            }; 
         });
+        userDictRef.current = userDict;
+      } catch (error) {
+        console.error("fetchUsersAndBatches error:", error);
+      }
 
+      try {
+        setLoading(true);
         let q;
         if (examId) {
            q = query(collection(db, 'results'), where('examId', '==', examId));
@@ -58,27 +65,27 @@ export function AdminResults() {
            data.push({ id: d.id, ...dData });
         });
 
-          // Match students
-          data.forEach(r => {
-             r.studentName = userDict[r.studentId]?.name || r.studentName || 'Unknown Student';
-             r.studentBatchId = userDict[r.studentId]?.batchId || null;
-             r.formattedDate = r.createdAt?.toDate().toLocaleDateString(undefined, {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-             }) || 'Unknown Date';
-          });
+        // Match students using userDictRef
+        data.forEach(r => {
+           const cachedUser = userDictRef.current[r.studentId] || {};
+           r.studentName = cachedUser.name || r.studentName || 'Unknown Student';
+           r.studentBatchId = cachedUser.batchId || null;
+           r.formattedDate = r.createdAt?.toDate().toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+           }) || 'Unknown Date';
+        });
 
-          setResults(data);
-          setLoading(false);
+        setResults(data);
+        setLoading(false);
       } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, 'results/batches');
+        handleFirestoreError(error, OperationType.LIST, 'results');
         setLoading(false);
       }
     };
 
-    fetchInitialData();
-
+    init();
   }, [examId, refreshKey]);
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -104,17 +111,20 @@ export function AdminResults() {
     
     try {
       setDeleting(true);
-      const batchFn = writeBatch(db);
-      selectedIds.forEach(id => {
-         batchFn.delete(doc(db, 'results', id));
-      });
-      await batchFn.commit();
+      const idsArray = Array.from(selectedIds) as string[];
+
+      // Delete in chunks of 490 to avoid 500 limit
+      for (let i = 0; i < idsArray.length; i += 490) {
+        const chunk = idsArray.slice(i, i + 490);
+        const batchOp = writeBatch(db);
+        chunk.forEach(id => batchOp.delete(doc(db, 'results', id)));
+        await batchOp.commit();
+      }
       
       setResults(results.filter(r => !selectedIds.has(r.id)));
       setSelectedIds(new Set());
       alert("Results deleted successfully.");
     } catch (error: any) {
-      alert("Delete failed: " + error.message);
       handleFirestoreError(error, OperationType.DELETE, 'results');
     } finally {
       setDeleting(false);

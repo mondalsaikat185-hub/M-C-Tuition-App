@@ -11,7 +11,7 @@ export default defineConfig(({mode}) => {
       react(), 
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
+        registerType: 'prompt',
         manifest: {
           name: 'Mondal Coaching',
           short_name: 'Target App',
@@ -41,7 +41,7 @@ export default defineConfig(({mode}) => {
         },
         workbox: {
           cleanupOutdatedCaches: true,
-          skipWaiting: true,
+          skipWaiting: false,
           clientsClaim: true
         }
       })

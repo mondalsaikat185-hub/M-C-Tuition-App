@@ -42,10 +42,18 @@ export function SecurePDFViewer({ url, trackingId, studentName, onClose }: Secur
         </div>
         
         <div className="flex items-center gap-2">
+           <button onClick={() => setPageNumber(p => Math.max(1, p - 1))} disabled={pageNumber <= 1} className="p-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50" title="Previous Page">
+             ◀
+           </button>
+           <span className="text-sm font-mono px-2 hidden sm:inline">{pageNumber} / {numPages || '?'}</span>
+           <button onClick={() => setPageNumber(p => Math.min(numPages || 1, p + 1))} disabled={pageNumber >= (numPages || 1)} className="p-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50" title="Next Page">
+             ▶
+           </button>
+           <div className="w-px h-8 bg-zinc-800 mx-2"></div>
            <button onClick={() => setScale(s => Math.max(0.5, s - 0.2))} className="p-2 bg-zinc-800 hover:bg-zinc-700" title="Zoom Out">
              <ZoomOut className="w-5 h-5" />
            </button>
-           <span className="text-sm font-mono px-2">{Math.round(scale * 100)}%</span>
+           <span className="text-sm font-mono px-2 hidden sm:inline">{Math.round(scale * 100)}%</span>
            <button onClick={() => setScale(s => Math.min(3, s + 0.2))} className="p-2 bg-zinc-800 hover:bg-zinc-700" title="Zoom In">
              <ZoomIn className="w-5 h-5" />
            </button>
@@ -89,17 +97,15 @@ export function SecurePDFViewer({ url, trackingId, studentName, onClose }: Secur
                 </div>
               }
             >
-              {Array.from({ length: numPages || 0 }, (_, index) => (
-                <div key={`page_${index + 1}`} className="mb-4 bg-white">
-                  <Page 
-                    pageNumber={index + 1} 
-                    scale={scale} 
-                    renderAnnotationLayer={false}
-                    renderTextLayer={false}
-                    className="max-w-full"
-                  />
-                </div>
-              ))}
+              <div className="mb-4 bg-white">
+                <Page 
+                  pageNumber={pageNumber} 
+                  scale={scale} 
+                  renderAnnotationLayer={false}
+                  renderTextLayer={false}
+                  className="max-w-full"
+                />
+              </div>
             </Document>
           </div>
         )}

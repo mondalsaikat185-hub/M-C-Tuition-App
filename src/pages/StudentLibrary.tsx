@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, getDocs, where, doc, getDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { PageHeader } from './Pages';
@@ -56,23 +56,46 @@ export function StudentLibrary() {
   const [libraryCache, setLibraryCache] = useState<Map<string, LibraryItem>>(() => {
     try {
       const saved = localStorage.getItem('libraryCache');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Simple 24h expiration check for cache entries could be added,
-        // but user requested "saved to local server ... next time, from local server."
-        // We will just load all of them.
-        return new Map(Object.entries(parsed)) as Map<string, LibraryItem>;
+      const cacheTime = localStorage.getItem('libraryCacheTime');
+      const CACHE_MAX_AGE = 24 * 60 * 60 * 1000;
+
+      if (saved && cacheTime) {
+        const age = Date.now() - parseInt(cacheTime);
+        if (age < CACHE_MAX_AGE) {
+          const parsed = JSON.parse(saved);
+          return new Map(Object.entries(parsed)) as Map<string, LibraryItem>;
+        } else {
+          localStorage.removeItem('libraryCache');
+          localStorage.removeItem('libraryCacheTime');
+          localStorage.removeItem('fetchedFolders');
+        }
       }
     } catch(e) { console.error('Cache load error', e); }
     return new Map();
   });
-  const [fetchedFolders, setFetchedFolders] = useState<Set<string>>(new Set());
+  const [fetchedFolders, setFetchedFolders] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('fetchedFolders');
+      if (saved) return new Set(JSON.parse(saved));
+    } catch(e) {}
+    return new Set();
+  });
+  const sessionCacheRef = useRef<Map<string, {data: any[], time: number}>>(new Map());
+
+  useEffect(() => {
+    try {
+       if (fetchedFolders.size > 0) {
+          localStorage.setItem('fetchedFolders', JSON.stringify(Array.from(fetchedFolders)));
+       }
+    } catch(e) {}
+  }, [fetchedFolders]);
   const [libraryMode, setLibraryMode] = useState<'EXAM' | 'NOTE' | null>(null);
 
   useEffect(() => {
     try {
        if (libraryCache.size > 0) {
           localStorage.setItem('libraryCache', JSON.stringify(Object.fromEntries(libraryCache)));
+          localStorage.setItem('libraryCacheTime', Date.now().toString());
        }
     } catch(e) { }
   }, [libraryCache]);
@@ -84,24 +107,22 @@ export function StudentLibrary() {
     }
     setLoading(true);
 
-    const fetchAssignments = async () => {
-       try {
-           const assignSnaps = await getDocs(query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId)));
-           const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()} as any));
-           assigns.sort((a,b) => {
-               const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
-               const tA = getMs(a.assignedAt);
-               const tB = getMs(b.assignedAt);
-               return tB - tA;
-           });
-           setAllAssigns(assigns);
-       } catch (err) {
-           console.error(err);
-           setLoading(false);
-       }
-    };
-    
-    fetchAssignments();
+    const q = query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId));
+    const unsubscribe = onSnapshot(q, (assignSnaps) => {
+       const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()} as any));
+       assigns.sort((a,b) => {
+           const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+           const tA = getMs(a.assignedAt);
+           const tB = getMs(b.assignedAt);
+           return tB - tA;
+       });
+       setAllAssigns(assigns);
+    }, (err) => {
+       console.error(err);
+       setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, [user?.batchId]);
 
   // Derive visible items synchronously
@@ -344,14 +365,13 @@ export function StudentLibrary() {
      if (!item.isChunked || !item.chunkCount || !item.id) return;
      try {
         setDownloadingId(item.id);
-        let base64String = '';
-        for (let i = 0; i < item.chunkCount; i++) {
-           const docRef = doc(db, 'libraryChunks', `${item.id}_${i}`);
-           const snap = await getDoc(docRef);
-           if (snap.exists()) {
-              base64String += snap.data().data;
-           }
-        }
+        const promises = Array.from({ length: item.chunkCount }, (_, i) =>
+           getDoc(doc(db, 'libraryChunks', `${item.id}_${i}`))
+        );
+        const snapshots = await Promise.all(promises);
+        const base64String = snapshots
+           .map(snap => (snap.exists() ? snap.data().data : ''))
+           .join('');
         
         const byteCharacters = atob(base64String);
         const byteNumbers = new Array(byteCharacters.length);
@@ -488,13 +508,25 @@ export function StudentLibrary() {
             return;
          }
 
-         const q = query(
-            collection(db, 'examSessions'),
-            where('examId', '==', item.id)
-         );
-         const snap = await getDocs(q);
+         const CACHE_TTL = 60 * 1000;
+         const cached = sessionCacheRef.current.get(item.id);
+         let snap: any;
 
-         const batchSessionDocs = snap.docs.filter(doc => doc.data().batchId === (user as any).batchId);
+         if (cached && Date.now() - cached.time < CACHE_TTL) {
+             snap = { docs: cached.data };
+         } else {
+             const q = query(
+                collection(db, 'examSessions'),
+                where('examId', '==', item.id)
+             );
+             const realSnap = await getDocs(q);
+             // Manually create an array of "docs" with data() so we can cache safely
+             const docsArray = realSnap.docs.map(d => ({ data: () => d.data(), id: d.id }));
+             sessionCacheRef.current.set(item.id, { data: docsArray, time: Date.now() });
+             snap = { docs: docsArray };
+         }
+
+         const batchSessionDocs = snap.docs.filter((doc: any) => doc.data().batchId === (user as any).batchId);
          const activeSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === true);
          const endedSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === false);
 
@@ -714,6 +746,8 @@ export function StudentLibrary() {
              <button 
                 onClick={() => {
                    localStorage.removeItem('libraryCache');
+                   localStorage.removeItem('libraryCacheTime');
+                   localStorage.removeItem('fetchedFolders');
                    window.location.reload();
                 }}
                 className="bg-black dark:bg-white text-white dark:text-black font-bold uppercase text-xs px-4 py-2 border-2 border-transparent hover:-translate-y-0.5 transition-transform"

@@ -30,18 +30,18 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
        setBatches(snap.docs.map(doc => ({id: doc.id, ...doc.data()})));
     };
     fetchBatches();
-  }, [user?.role, refreshKey]);
-
+  }, [user?.uid]);
+  
   useEffect(() => {
     if (!user) return;
 
     let q;
     if (user.role === 'admin') {
        // admin sees all
-       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(100));
+       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
     } else {
        // student sees admin_to_all, admin_to_batch (where batch matches), and their own sent msgs
-       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(100));
+       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(30));
     }
 
     const fetchNotifs = async () => {

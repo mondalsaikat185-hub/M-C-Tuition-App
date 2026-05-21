@@ -7,6 +7,7 @@ import {
   serverTimestamp,
   collection,
   getDocs,
+  addDoc,
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
@@ -91,7 +92,6 @@ export function ProfileSetup() {
       // Send notification to admin if status changed to pending
       if (statusUpdate.status === "pending") {
         try {
-          const { addDoc } = await import("firebase/firestore");
           await addDoc(collection(db, "notifications"), {
             title: "New Student Enrollment Request",
             body: `${fullName.trim()} has submitted an enrollment/re-enrollment request.`,
@@ -108,7 +108,6 @@ export function ProfileSetup() {
 
       navigate("/student");
     } catch (error: any) {
-      alert("Error updating profile: " + String(error.message || error));
       try {
         handleFirestoreError(error, OperationType.UPDATE, "users");
       } catch (e) {}
