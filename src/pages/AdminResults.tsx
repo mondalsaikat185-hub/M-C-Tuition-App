@@ -6,6 +6,7 @@ import { PageHeader } from './Pages';
 import { Loader2, Trash2, Search } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { cachedGetDocs } from '../lib/cache';
+import { safeToDate } from '../lib/utils';
 
 export function AdminResults() {
   const { examId } = useParams();
@@ -81,11 +82,14 @@ export function AdminResults() {
            const cachedUser = userDictRef.current[r.studentId] || {};
            r.studentName = r.studentName || cachedUser.name || 'Unknown Student';
            r.studentBatchId = r.studentBatchId || cachedUser.batchId || null;
-           r.formattedDate = r.createdAt?.toDate().toLocaleDateString(undefined, {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric'
-           }) || 'Unknown Date';
+           r.formattedDate = (() => {
+              const d = safeToDate(r.createdAt);
+              return d ? d.toLocaleDateString(undefined, {
+                 year: 'numeric',
+                 month: 'short',
+                 day: 'numeric'
+              }) : 'Unknown Date';
+           })();
         });
 
         setResults(data);
@@ -299,7 +303,10 @@ export function AdminResults() {
                         />
                      </td>
                      <td className="p-2 text-xs font-mono opacity-70">
-                        {r.createdAt?.toDate().toLocaleString() || 'N/A'}
+                        {(() => {
+                           const d = safeToDate(r.createdAt);
+                           return d ? d.toLocaleString(): 'N/A';
+                        })()}
                      </td>
                      <td className="p-2 font-bold text-sm">{r.studentName}</td>
                      <td className="p-2 text-sm text-zinc-600 dark:text-zinc-400">{r.examTitle}</td>

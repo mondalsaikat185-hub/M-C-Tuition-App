@@ -124,8 +124,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
   const config = { 
     totalTime: rootConfig.totalTime ?? 1800, 
     marksCorrect: rootConfig.marksCorrect ?? 2, 
-    marksWrong: rootConfig.marksWrong !== undefined ? -Math.abs(rootConfig.marksWrong) : -0.5, 
-    ...parsedConfig 
+    ...parsedConfig,
+    marksWrong: parsedConfig.marksWrong !== undefined ? -Math.abs(parsedConfig.marksWrong) : (rootConfig.marksWrong !== undefined ? -Math.abs(rootConfig.marksWrong) : -0.5)
   };
 
   const startQuiz = () => {
@@ -251,6 +251,32 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
      );
   }
 
+  // ══════ NEW: Empty quiz guard ══════
+  if (questions.length === 0) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] text-center mt-8">
+        <div className="text-5xl mb-4">⚠️</div>
+        <h2 className="text-2xl font-black uppercase mb-4 text-zinc-900 dark:text-zinc-100">
+          No Questions Available
+        </h2>
+        <p className="font-bold text-zinc-600 dark:text-zinc-400 mb-2">
+          This exam has no questions set up yet.
+        </p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-500 mb-6 font-medium">
+          এই পরীক্ষায় এখনো কোনো প্রশ্ন যোগ করা হয়নি।
+          দয়া করে শিক্ষকের সাথে যোগাযোগ করুন।
+        </p>
+        <button
+          onClick={onBack}
+          className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-black uppercase px-6 py-3 border-2 border-transparent shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] hover:-translate-y-0.5 transition-transform"
+        >
+          ← Back to Library
+        </button>
+      </div>
+    );
+  }
+  // ══════ END: Empty quiz guard ══════
+
   if (screen === 'AGREEMENT') {
      return (
         <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-red-600 shadow-[8px_8px_0px_0px_rgba(220,38,38,1)]">
@@ -287,7 +313,9 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
         </div>
 
         <div className="flex gap-4">
-          <button onClick={startQuiz} className="flex-1 bg-emerald-600 text-white font-bold uppercase py-3 border-2 border-transparent hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(4,120,87,1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">Start Quiz</button>
+          <button onClick={startQuiz} disabled={questions.length === 0} className="flex-1 bg-emerald-600 text-white font-bold uppercase py-3 border-2 border-transparent hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(4,120,87,1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+             {questions.length === 0 ? 'No Questions Available' : 'Start Quiz'}
+          </button>
           <button onClick={onBack} className="bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-white font-bold uppercase py-3 px-6 border-2 border-zinc-900 dark:border-zinc-100 hover:-translate-y-0.5 transition-transform shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(255,255,255,1)]">Back</button>
         </div>
       </div>

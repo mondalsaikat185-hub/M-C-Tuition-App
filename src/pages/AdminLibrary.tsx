@@ -708,7 +708,7 @@ export function AdminLibrary() {
   }
 
   const breadcrumbs = folderBreadcrumbs.map(b => ({ id: b.id, title: b.title }));
-  const currentItems = items;
+  const currentItems = items.filter(i => (i.parentId || null) === currentFolderId);
   const folders = currentItems.filter(i => i.isFolder).sort((a,b) => a.title.localeCompare(b.title));
   const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
   const files = currentItems.filter(i => !i.isFolder).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
@@ -897,7 +897,7 @@ export function AdminLibrary() {
             <div className="p-8 text-center text-zinc-500 font-bold border-2 border-dashed border-zinc-300 dark:border-zinc-700">This folder is empty. Create a subfolder or upload items!</div>
         ) : (
             <>
-               {folders.map(folder => (
+               {folders.map((folder, index) => (
                   <div key={folder.id} className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors" onClick={(e) => {
                      // don't navigate if clicking delete
                      if ((e.target as HTMLElement).closest('.action-btn')) return;
@@ -922,7 +922,7 @@ export function AdminLibrary() {
                   </div>
                ))}
                
-               {files.map(item => (
+               {files.map((item, index) => (
             <div key={item.id} className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                <div>
                   <div className="flex flex-wrap items-center gap-2 mb-1">

@@ -204,11 +204,11 @@ export function AdminStudents() {
     try {
       const updates: any = { status: newStatus };
       if (newStatus === 'active') {
-        updates.createdAt = serverTimestamp();
+        updates.updatedAt = serverTimestamp();
       }
       await updateDoc(doc(db, 'users', uid), updates);
       globalStudentsCache = null;
-      setStudents(students.map(s => s.uid === uid ? { ...s, status: newStatus as any, createdAt: newStatus === 'active' ? Timestamp.now() : s.createdAt } : s));
+      setStudents(students.map(s => s.uid === uid ? { ...s, status: newStatus as any, updatedAt: newStatus === 'active' ? Timestamp.now() : s.updatedAt } : s));
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
     }
@@ -1012,6 +1012,7 @@ export function AdminPayments() {
       if (remarks) payload.remarks = remarks;
       await updateDoc(doc(db, 'payments', id), payload);
       setPayments(payments.map(p => p.id === id ? { ...p, status, remarks } : p));
+      clearCache('all_payments');
       
       if (status === 'rejected') {
          const paymentToUpdate = payments.find(p => p.id === id);
@@ -1197,7 +1198,7 @@ export function AdminPayments() {
                     <div className="text-center text-zinc-500 font-bold py-8 border-2 border-dashed border-zinc-300 dark:border-zinc-700">No payment history.</div>
                  ) : (
                     <div className="space-y-4">
-                       {studentPayments.map(p => (
+                       {studentPayments.map((p, idx) => (
                           <div key={p.id} className="border-2 border-zinc-200 dark:border-zinc-800 p-3">
                              <div className="flex justify-between items-center mb-2">
                                 <span className="font-black uppercase text-sm">{p.month}</span>
@@ -1249,7 +1250,7 @@ export function AdminPayments() {
                   <div className="col-span-full py-8 text-center border-2 border-dashed border-zinc-300 dark:border-zinc-700 font-bold text-zinc-500">
                      No students in this batch. To add students, go to the 'Students Management' module and click '+ Create Virtual Student'.
                   </div>
-               ) : bStudents.map(s => {
+               ) : bStudents.map((s, idx) => {
                   const pendingCount = payments.filter(p => p.studentId === s.id && p.status === 'pending').length;
                   return (
                     <button key={s.id} onClick={() => setSelectedStudentId(s.id)} className="w-full text-left p-4 border-2 border-zinc-200 dark:border-zinc-800 hover:border-zinc-900 dark:hover:border-zinc-100 flex flex-col items-start gap-1">
@@ -1283,7 +1284,7 @@ export function AdminPayments() {
            <div className="text-zinc-600 dark:text-zinc-400 font-bold italic">You're all caught up! No pending payments to verify.</div>
          ) : (
          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-           {allPending.map(p => (
+           {allPending.map((p, idx) => (
               <div key={p.id} className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)]">
                 <div className="text-xs font-bold uppercase text-zinc-500 mb-1">{p.studentName || p.studentEmail}</div>
                 <div className="flex justify-between items-center mb-3">
@@ -1337,7 +1338,7 @@ export function StudentPayments() {
   const [settings, setSettings] = useState({ adminUpiId: '', enablePaymentSystem: true });
 
   const monthlyFeeAmount = Number(user?.monthlyFee) || 0;
-  const isFeeWaived = user?.monthlyFee === 0;
+  const isFeeWaived = user?.monthlyFee === 0 || user?.monthlyFee === "0";
   
   const calculatedAmount = selectedMonths.length > 0 ? selectedMonths.length * (monthlyFeeAmount > 0 ? monthlyFeeAmount : 500) : (monthlyFeeAmount > 0 ? monthlyFeeAmount : 500);
 
@@ -1624,7 +1625,7 @@ export function StudentPayments() {
                   No payment history found.
                 </div>
               )}
-              {payments.map(payment => (
+              {payments.map((payment, idx) => (
                 <div key={payment.id} className="flex flex-col sm:flex-row justify-between sm:items-center p-4 border-2 border-zinc-200 dark:border-zinc-800 gap-4">
                   <div>
                     <h4 className="font-black text-lg uppercase">{payment.month}</h4>

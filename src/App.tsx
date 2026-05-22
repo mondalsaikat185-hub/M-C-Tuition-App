@@ -25,6 +25,7 @@ import {
   Bell,
 } from "lucide-react";
 import { db } from "./lib/firebase";
+import { safeToDate } from "./lib/utils";
 import {
   doc,
   updateDoc,
@@ -206,13 +207,13 @@ function TopNav() {
   useEffect(() => {
     if (!user) return;
 
-    const q = query(
+    let qCall = query(
       collection(db, "notifications"),
       orderBy("createdAt", "desc"),
-      limit(20)
+      limit(user.role === "student" ? 100 : 20) // Load more for students so client-side filter catches relevant ones
     );
 
-    const unsubscribe = onSnapshot(q, (snap) => {
+    const unsubscribe = onSnapshot(qCall, (snap) => {
       let notifs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       if (user.role === "student") {
         notifs = notifs.filter(
@@ -252,7 +253,7 @@ function TopNav() {
         address: editAddress,
       });
       updateLocalUser({
-        displayName: editName,
+        fullName: editName,
         address: editAddress
       } as any);
       setShowEditProfile(false);
@@ -1040,9 +1041,9 @@ function StudentDashboard() {
                 No exams are currently active for your batch.
               </div>
             ) : (
-              exams.map((exam) => {
+              exams.map((exam, index) => {
                 const timestamp = (exam as any).createdAt;
-                const d = timestamp ? timestamp.toDate() : null;
+                const d = safeToDate(timestamp);
                 const dateStr = d
                   ? d.toLocaleDateString("en-IN", {
                       weekday: "short",
@@ -1134,9 +1135,9 @@ function StudentDashboard() {
                 No active notes available right now.
               </div>
             ) : (
-              notes.map((note) => {
+              notes.map((note, index) => {
                 const timestamp = (note as any).createdAt;
-                const d = timestamp ? timestamp.toDate() : null;
+                const d = safeToDate(timestamp);
                 const dateStr = d
                   ? d.toLocaleDateString("en-IN", {
                       weekday: "short",

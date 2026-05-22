@@ -16,7 +16,7 @@ import { cachedGetDocs } from "../lib/cache";
 import { Loader2 } from "lucide-react";
 
 export function ProfileSetup() {
-  const { user } = useAuth();
+  const { user, updateLocalUser } = useAuth();
   const navigate = useNavigate();
   const [fullName, setFullName] = useState(
     user?.displayName || user?.fullName || "",
@@ -106,6 +106,12 @@ export function ProfileSetup() {
           console.error("Failed to send notification to admin", notifErr);
           // Non-critical, so we proceed
         }
+      }
+
+      if (updateLocalUser) {
+        updateLocalUser({
+          fullName, phone, address, gender
+        } as any);
       }
 
       navigate("/student");

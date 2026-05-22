@@ -9,6 +9,7 @@ import { LibraryItem } from './AdminLibrary';
 import { verifyAndJoinSession, joinSessionWithoutCode } from '../lib/exam-session-utils';
 import { useSearchParams } from 'react-router-dom';
 import { cachedGetDocs } from '../lib/cache';
+import { safeToDate } from '../lib/utils';
 
 export function StudentLibrary() {
   const { user } = useAuth();
@@ -102,7 +103,10 @@ export function StudentLibrary() {
   }, [libraryCache]);
 
   const fetchAssignments = async () => {
-    if (!user?.batchId) return;
+    if (!user?.batchId) {
+        setLoading(false);
+        return;
+    }
     setLoading(true);
     try {
         const q = query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId));
@@ -298,6 +302,11 @@ export function StudentLibrary() {
       }
 
       const blob = await response.blob();
+      if (blob.size === 0 || blob.type.includes('text/html')) {
+          setDownloadingId(null);
+          alert('Failed to download file from Oracle server. Empty or invalid response. Please try standard download or contact admin.');
+          return;
+      }
       const blobUrl = URL.createObjectURL(blob);
 
       // Detect restricted environments
@@ -619,13 +628,35 @@ export function StudentLibrary() {
   };
 
   if (previewItem) {
+     if (previewItem.type !== 'exam') {
+        // Safety guard: non-exam item should never reach UnifiedQuizPlayer
+        return (
+          <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] text-center mt-8">
+            <div className="text-5xl mb-4">📄</div>
+            <h2 className="text-2xl font-black uppercase mb-4">Study Material</h2>
+            <p className="font-bold text-zinc-600 dark:text-zinc-400 mb-6">
+              এই study material টি Library থেকে Download করুন।
+              এটি এখানে সরাসরি দেখানো সম্ভব নয়।
+            </p>
+            <button
+              onClick={() => setPreviewItem(null)}
+              className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-black uppercase px-6 py-3 border-2 border-transparent shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] hover:-translate-y-0.5 transition-transform"
+            >
+              ← Library-তে ফিরুন
+            </button>
+          </div>
+        );
+     }
      return <UnifiedQuizPlayer exam={previewItem as any} onBack={() => setPreviewItem(null)} />;
   }
 
   const getBreadcrumbs = () => {
      const crumbs: {id: string, title: string}[] = [];
      let curr = currentFolderId;
+     const visited = new Set<string>();
      while (curr) {
+        if (visited.has(curr)) break;
+        visited.add(curr);
         const folder = items.find(i => i.id === curr);
         if (folder) {
            crumbs.unshift({ id: folder.id, title: folder.title });
@@ -677,9 +708,18 @@ export function StudentLibrary() {
     ? files 
     : items.filter(i => !i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam')).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
 
+   // Debug check
+   useEffect(() => {
+     const ids = allFilesSorted.map(i => i.id);
+     const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+     if (duplicates.length > 0) console.error("DUPLICATE IDS FOUND:", duplicates);
+     if (ids.some(id => !id)) console.error("MISSING IDS FOUND");
+   }, [allFilesSorted]);
+
   const formatDate = (timestamp: any) => {
      if (!timestamp) return 'No date';
-     const d = timestamp.toDate();
+     const d = safeToDate(timestamp);
+     if (!d) return 'Invalid date';
      return d.toLocaleString('en-IN', {
         day: 'numeric', month: 'short', year: 'numeric',
         hour: '2-digit', minute: '2-digit', hour12: true
@@ -790,7 +830,7 @@ export function StudentLibrary() {
                <button onClick={() => handleOpenFolder(null)} className="hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1 shrink-0">
                   <Folder className="w-4 h-4"/> Home
                </button>
-               {breadcrumbs.map(bc => (
+               {breadcrumbs.map((bc, idx) => (
                    <React.Fragment key={bc.id}>
                       <ChevronRight className="w-4 h-4 shrink-0" />
                       <button onClick={() => handleOpenFolder(bc.id)} className="hover:text-zinc-900 dark:hover:text-zinc-100 shrink-0">
@@ -805,7 +845,7 @@ export function StudentLibrary() {
                   <div className="p-8 text-center text-zinc-500 font-bold border-2 border-dashed border-zinc-300 dark:border-zinc-700">Content will appear here once assigned by the administrator.</div>
               ) : (
                   <>
-                     {folders.map(folder => (
+                     {folders.map((folder, idx) => (
                         <div key={folder.id} 
                              className="bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 p-4 shadow-[4px_4px_0px_0px_rgba(24,24,27,1)] dark:shadow-[4px_4px_0px_0px_rgba(244,244,245,1)] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors" 
                              onClick={() => handleOpenFolder(folder.id)}>
@@ -819,7 +859,7 @@ export function StudentLibrary() {
                         </div>
                      ))}
                      
-                     {files.map(item => (
+                     {files.map((item, index) => (
                         <FileCard key={item.id} item={item} onPreview={() => handleItemClick(item)} formatDate={formatDate} onDownloadChunked={() => handleDownloadChunked(item)} onDownloadUrl={() => handleDownloadUrl(item)} downloadingId={downloadingId} showPath={!!searchQuery} items={items} />
                      ))}
                   </>
@@ -842,7 +882,7 @@ export function StudentLibrary() {
              ) : (
                  Array.from(Object.entries(
                     allFilesSorted.reduce((acc: any, item) => {
-                       const d = item.createdAt?.toDate();
+                       const d = safeToDate(item.createdAt);
                        const dateStr = d ? d.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : 'Older';
                        if (!acc[dateStr]) acc[dateStr] = [];
                        acc[dateStr].push(item);
@@ -852,7 +892,7 @@ export function StudentLibrary() {
                     <div key={dateLabel}>
                        <h3 className="font-black text-xl uppercase mb-4 text-zinc-900 dark:text-zinc-100 border-b-2 border-zinc-200 dark:border-zinc-800 pb-2">{dateLabel}</h3>
                        <div className="grid grid-cols-1 gap-4">
-                          {itemsInDate.map((item: any) => (
+                          {itemsInDate.map((item: any, idx: number) => (
                              <FileCard key={item.id} item={item} onPreview={() => handleItemClick(item)} formatDate={formatDate} showPath items={items} onDownloadChunked={() => handleDownloadChunked(item)} onDownloadUrl={() => handleDownloadUrl(item)} downloadingId={downloadingId} />
                           ))}
                        </div>

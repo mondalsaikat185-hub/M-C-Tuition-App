@@ -4,6 +4,7 @@ import { useAuth } from './AuthProvider';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, arrayUnion, limit } from 'firebase/firestore';
 import { cachedGetDocs } from '../lib/cache';
+import { safeToDate } from '../lib/utils';
 
 export function NotificationsPanel({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
@@ -100,6 +101,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
         setTitle('');
         setMessage('');
         setTargetBatch('all');
+        clearCache(`notifications_${user.uid}`);
         setRefreshKey(k => k + 1);
      } catch (err) {
         console.error("Failed to save notification", err);
@@ -128,6 +130,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
      try {
         await deleteDoc(doc(db, 'notifications', id));
         setConfirmDeleteId(null);
+        setNotifications(prev => prev.filter(n => n.id !== id));
      } catch(e) { console.error(e); }
   };
 
@@ -154,7 +157,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
                  <div className="flex items-center gap-2">
                     <Bell className="w-5 h-5" /> Notifications
                  </div>
-                 <button onClick={() => setRefreshKey(k => k + 1)} className="text-xs uppercase bg-black dark:bg-zinc-100 text-white dark:text-black px-2 py-1 flex items-center gap-1 active:translate-y-px">
+                 <button onClick={() => { clearCache(`notifications_${user.uid}`); setRefreshKey(k => k + 1); }} className="text-xs uppercase bg-black dark:bg-zinc-100 text-white dark:text-black px-2 py-1 flex items-center gap-1 active:translate-y-px">
                      Refresh
                  </button>
              </div>
@@ -236,7 +239,10 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
                                          {notif.batchName && notif.batchName !== 'Unknown Batch' ? ` → ${notif.batchName}` : ''}
                                       </span>
                                       <span className="text-[10px] font-medium text-zinc-400">
-                                         {notif.createdAt?.toDate().toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                         {(() => {
+                                          const d = safeToDate(notif.createdAt);
+                                          return d ? d.toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A';
+                                       })()}
                                       </span>
                                    </div>
                                 </div>
