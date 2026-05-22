@@ -231,7 +231,6 @@ export function StudentLibrary() {
 
                      snaps.forEach(snap => {
                         const data = { id: snap.id, ...snap.data() } as LibraryItem;
-                        if (data.isChunked) return;
                         currentCache.set(data.id, data);
                         if (data.parentId && !currentCache.has(data.parentId)) {
                             nextIds.add(data.parentId);
@@ -262,7 +261,6 @@ export function StudentLibrary() {
              const newCache = new Map(libraryCache);
              snaps.forEach(snap => {
                 const data = snap.data();
-                if (data.isChunked) return;
                 newCache.set(snap.id, { id: snap.id, ...data } as LibraryItem);
              });
              setLibraryCache(newCache);
@@ -329,7 +327,15 @@ export function StudentLibrary() {
 
       if (isIOS) {
         const newTab = window.open(blobUrl, '_blank');
-        if (!newTab) window.location.href = blobUrl;
+        if (!newTab) {
+          URL.revokeObjectURL(blobUrl);
+          setDownloadMessage({
+            title: '⚠️ Popup Blocked',
+            body: 'Popup blocked হয়েছে। Settings → Safari → Block Pop-ups বন্ধ করুন, তারপর আবার try করুন।',
+            isWarning: true
+          });
+          return;
+        }
         setTimeout(() => URL.revokeObjectURL(blobUrl), 90000);
         setDownloadMessage({
           title: '📄 PDF Opened in Browser',
@@ -460,7 +466,15 @@ export function StudentLibrary() {
 
         if (isIOS) {
           const newTab = window.open(blobUrl, '_blank');
-          if (!newTab) window.location.href = blobUrl;
+          if (!newTab) {
+            URL.revokeObjectURL(blobUrl);
+            setDownloadMessage({
+              title: '⚠️ Popup Blocked',
+              body: 'Popup blocked হয়েছে। Settings → Safari → Block Pop-ups বন্ধ করুন, তারপর আবার try করুন।',
+              isWarning: true
+            });
+            return;
+          }
           setTimeout(() => URL.revokeObjectURL(blobUrl), 90000);
           setDownloadMessage({
             title: '📄 PDF Opened in Browser',
@@ -1009,11 +1023,13 @@ export function StudentLibrary() {
 function FileCard({ item, onPreview, formatDate, showPath, items, onDownloadChunked, onDownloadUrl, downloadingId }: { key?: React.Key, item: LibraryItem, onPreview: () => void, formatDate: (ts: any) => string, showPath?: boolean, items?: LibraryItem[], onDownloadChunked?: () => void, onDownloadUrl?: () => void, downloadingId?: string | null }) {
    const renderPath = () => {
       if (!showPath || !items || !item.parentId) return null;
-      const getPathStr = (id: string): string => {
+      const getPathStr = (id: string, visited: Set<string> = new Set()): string => {
+         if (visited.has(id)) return '...'; // Prevent infinite loop on circular refs
+         visited.add(id);
          const p = items.find(i => i.id === id);
          if (!p) return '';
-         const parentStr = p.parentId ? getPathStr(p.parentId) : '';
-         return parentStr ? `${parentStr} / ${p.title}` : p.title;
+         const parentStr = p.parentId ? getPathStr(p.parentId, visited) : '';
+         return parentStr ? `${parentStr} / ${p.title}` : (p.title || '');
       };
       const pstr = getPathStr(item.parentId);
       return <div className="text-[10px] uppercase font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 mt-2 inline-block">📁 {pstr}</div>;
