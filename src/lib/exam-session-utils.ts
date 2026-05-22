@@ -127,27 +127,35 @@ export async function recordAttendance(
 }
 
 // ─── Get all attendance days for a batch ──────────────────────────────────
-export async function getAllAttendanceForBatch(batchId: string, limitCount?: number) {
-  // Use a simple equality query to avoid needing a composite index
-  let q = query(
-    collection(db, 'attendance'),
-    where('batchId', '==', batchId)
-  );
+export async function getAllAttendanceForBatch(batchId: string, limitCount: number = 10) {
+  try {
+    const q = query(
+      collection(db, 'attendance'),
+      where('batchId', '==', batchId),
+      orderBy('date', 'desc'),
+      limit(limitCount)
+    );
+    const snap = await cachedGetDocs(q, `attendance_${batchId}_${limitCount}`);
 
-  const snap = await cachedGetDocs(q, `attendance_batch_${batchId}`);
-  
-  const mapped = snap.docs.map((d: any) => ({
-    date: d.data().date as string,
-    presentStudentIds: d.data().presentStudentIds as string[],
-  }));
-
-  // Sort descending manually in JS
-  mapped.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-  if (limitCount && limitCount > 0) {
-     return mapped.slice(0, limitCount);
+    return snap.docs.map((d: any) => ({
+      date: d.data().date as string,
+      presentStudentIds: d.data().presentStudentIds as string[],
+    }));
+  } catch (err: any) {
+    console.warn("Index fallback for attendance:", err.message);
+    const fallbackQ = query(
+      collection(db, 'attendance'),
+      where('batchId', '==', batchId),
+      limit(limitCount * 2)
+    );
+    const snap = await cachedGetDocs(fallbackQ, `attendance_batch_${batchId}`);
+    const mapped = snap.docs.map((d: any) => ({
+      date: d.data().date as string,
+      presentStudentIds: d.data().presentStudentIds as string[],
+    }));
+    mapped.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return mapped.slice(0, limitCount);
   }
-  return mapped;
 }
 
 // ─── Join session without code (when code requirement is off) ───────────────

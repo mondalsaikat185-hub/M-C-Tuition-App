@@ -110,7 +110,7 @@ export function AdminStudents() {
     if (attendanceData[activeBatchTab]) return;
 
     const fetchOneBatch = async () => {
-      const data = await getAllAttendanceForBatch(activeBatchTab);
+      const data = await getAllAttendanceForBatch(activeBatchTab, 30);
       setAttendanceData(prev => ({ ...prev, [activeBatchTab]: data }));
     };
     fetchOneBatch();

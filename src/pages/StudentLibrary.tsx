@@ -193,10 +193,9 @@ export function StudentLibrary() {
 
         const neededRootIds = Array.from(new Set<string>(visibleAssigns.map(a => a.libraryItemId)));
         
-        // Use functional state update to ensure we have the very latest cache
-        let currentCache = new Map<string, LibraryItem>();
-        setLibraryCache((prev: Map<string, LibraryItem>) => { currentCache = new Map(prev); return prev; });
-        
+        // Read cache directly — this is safe because libraryCache is in the dependency array
+        const currentCache = new Map(libraryCache);
+
         let missingIds = neededRootIds.filter(id => !currentCache.has(id));
         missingIds.sort(); // Sort to ensure stable chunk cache keys
 
@@ -246,7 +245,7 @@ export function StudentLibrary() {
     };
 
     processVisibleItems();
-  }, [allAssigns, weeksToShow]); // Don't include libraryCache to prevent infinite loop
+  }, [allAssigns, weeksToShow, libraryCache]); // Safe: exits early when all items cached
 
   const handleOpenFolder = async (folderId: string | null) => {
       setCurrentFolderId(folderId);
@@ -512,8 +511,7 @@ export function StudentLibrary() {
   const handleItemClick = async (item: LibraryItem) => {
      try {
          if (item.type !== 'exam') {
-            setPreviewItem(item);
-            return;
+             return;
          }
 
          if (!user || !(user as any).batchId) {
