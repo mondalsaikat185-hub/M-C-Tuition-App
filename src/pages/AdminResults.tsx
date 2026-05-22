@@ -5,6 +5,7 @@ import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { PageHeader } from './Pages';
 import { Loader2, Trash2, Search } from 'lucide-react';
 import { useParams } from 'react-router-dom';
+import { cachedGetDocs } from '../lib/cache';
 
 export function AdminResults() {
   const { examId } = useParams();
@@ -27,7 +28,7 @@ export function AdminResults() {
   useEffect(() => {
     const init = async () => {
       try {
-        const bSnap = await getDocs(collection(db, 'batches'));
+        const bSnap = await cachedGetDocs(query(collection(db, 'batches')), 'all_batches');
         const bData: any[] = [];
         bSnap.forEach(d => bData.push({ id: d.id, ...d.data() }));
         setBatches(bData);
@@ -47,7 +48,7 @@ export function AdminResults() {
            q = query(collection(db, 'results'), orderBy('createdAt', 'desc'), limit(100)); // Limit to 100 recent results by default to save quota
         }
         
-        const qSnap = await getDocs(q);
+        const qSnap = await cachedGetDocs(q, examId ? `results_${examId}` : `results_recent_100`);
         const data: any[] = [];
           
         qSnap.forEach(d => {
@@ -57,11 +58,13 @@ export function AdminResults() {
 
         // Lazily fetch missing users to prevent massive quota usage
         const uniqueUserIds = Array.from(new Set(data.map(r => r.studentId).filter(id => !userDictRef.current[id])));
+        uniqueUserIds.sort(); // Sort to ensure stable chunk cache keys
         try {
            for (let i = 0; i < uniqueUserIds.length; i += 30) {
                const chunk = uniqueUserIds.slice(i, i + 30);
                const uQuery = query(collection(db, 'users'), where('__name__', 'in', chunk));
-               const uSnap = await getDocs(uQuery);
+               chunk.sort();
+               const uSnap = await cachedGetDocs(uQuery, `users_chunk_${chunk.join('_')}`);
                uSnap.forEach(d => {
                    userDictRef.current[d.id] = {
                        name: d.data().fullName || d.data().displayName || d.data().email || 'Unknown',

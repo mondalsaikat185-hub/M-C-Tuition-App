@@ -1,8 +1,9 @@
 import {
   collection, doc, addDoc, updateDoc, getDocs, getDoc, setDoc, writeBatch,
-  query, where, orderBy, arrayUnion, serverTimestamp, Timestamp
+  query, where, orderBy, arrayUnion, serverTimestamp, Timestamp, limit
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { cachedGetDocs } from './cache';
 
 // ─── Generate a 5-character access code ─────────────────────────────────────
 // Excludes visually ambiguous characters: 0, O, 1, I, L
@@ -36,7 +37,7 @@ export async function createExamSession(
 
   // Initialize attendance ONLY if the session requires a code (live session)
   if (codeEnabled) {
-    const today = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+    const today = new Date().toLocaleDateString('en-CA'); // "YYYY-MM-DD" in local time
     const attendanceId = `${batchId}_${today}`;
     const attendanceRef = doc(db, 'attendance', attendanceId);
     const snap = await getDoc(attendanceRef);
@@ -104,7 +105,7 @@ export async function recordAttendance(
   studentUid: string,
   sessionId: string
 ): Promise<void> {
-  const today = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+  const today = new Date().toLocaleDateString('en-CA'); // "YYYY-MM-DD" in local time
   const attendanceId = `${batchId}_${today}`;
   const attendanceRef = doc(db, 'attendance', attendanceId);
 
@@ -126,19 +127,27 @@ export async function recordAttendance(
 }
 
 // ─── Get all attendance days for a batch ──────────────────────────────────
-export async function getAllAttendanceForBatch(batchId: string) {
-  const q = query(
+export async function getAllAttendanceForBatch(batchId: string, limitCount?: number) {
+  // Use a simple equality query to avoid needing a composite index
+  let q = query(
     collection(db, 'attendance'),
-    where('batchId', '==', batchId),
-    orderBy('date', 'desc')
+    where('batchId', '==', batchId)
   );
-  const snap = await getDocs(q);
-  const docs = snap.docs;
+
+  const snap = await cachedGetDocs(q, `attendance_batch_${batchId}`);
   
-  return docs.map((d) => ({
+  const mapped = snap.docs.map((d: any) => ({
     date: d.data().date as string,
     presentStudentIds: d.data().presentStudentIds as string[],
   }));
+
+  // Sort descending manually in JS
+  mapped.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  if (limitCount && limitCount > 0) {
+     return mapped.slice(0, limitCount);
+  }
+  return mapped;
 }
 
 // ─── Join session without code (when code requirement is off) ───────────────

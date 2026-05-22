@@ -8,6 +8,7 @@ import { AppUser, useAuth } from '../components/AuthProvider';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
 import { getAllAttendanceForBatch } from '../lib/exam-session-utils';
+import { clearCache, cachedGetDocs } from '../lib/cache';
 
 export function PageHeader({ title, backTo, description, onBack }: { title: string, backTo?: string, description?: string, onBack?: () => void }) {
   const navigate = useNavigate();
@@ -28,6 +29,12 @@ export function PageHeader({ title, backTo, description, onBack }: { title: stri
     </div>
   );
 }
+
+// Simple global cache to prevent excessive quota reads
+let globalStudentsCache: AppUser[] | null = null;
+let globalBatchesCache: Batch[] | null = null;
+let globalCacheTime = 0;
+const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
 
 // ADMIN PAGES
 export function AdminStudents() {
@@ -64,6 +71,7 @@ export function AdminStudents() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+      globalStudentsCache = null;
       setStudents(prev => [...prev, {
         uid: mockUid,
         email: newStudentEmail.toLowerCase(),
@@ -121,7 +129,18 @@ export function AdminStudents() {
           // Calculate absent count
           const sBatchAtt = attendanceData[s.batchId!] || [];
           let recentAbsences = 0;
-          for (let i = 0; i < Math.min(3, sBatchAtt.length); i++) {
+          let validExamsChecked = 0;
+          
+          for (let i = 0; i < sBatchAtt.length && validExamsChecked < 3; i++) {
+             // Only count exams if they occurred on or after the student joined
+             const attDateMs = new Date(sBatchAtt[i].date).getTime();
+             const msJoined = s.createdAt?.toMillis?.() || (s.createdAt?.seconds ? s.createdAt.seconds * 1000 : 0);
+             // Give a 24-hour leniency window for timezones
+             if (msJoined && attDateMs < msJoined - 86400000) {
+                 continue; // skip exams before they joined
+             }
+
+             validExamsChecked++;
              if (!sBatchAtt[i].presentStudentIds.includes(s.uid)) {
                 recentAbsences++;
              } else {
@@ -142,9 +161,16 @@ export function AdminStudents() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        if (globalStudentsCache && globalBatchesCache && Date.now() - globalCacheTime < CACHE_TTL) {
+           setStudents(globalStudentsCache);
+           setBatches(globalBatchesCache);
+           setLoading(false);
+           return;
+        }
+
         const [studentsSnap, batchesSnap] = await Promise.all([
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'batches')),
+          cachedGetDocs(collection(db, 'users'), 'all_users'),
+          cachedGetDocs(collection(db, 'batches'), 'all_batches'),
         ]);
         
         const studentsData: AppUser[] = [];
@@ -155,13 +181,16 @@ export function AdminStudents() {
           }
         });
         setStudents(studentsData);
+        globalStudentsCache = studentsData;
 
         const batchesData: Batch[] = [];
         batchesSnap.forEach((doc) => {
           batchesData.push({ id: doc.id, ...doc.data() } as Batch);
         });
         setBatches(batchesData);
+        globalBatchesCache = batchesData;
 
+        globalCacheTime = Date.now();
       } catch (error) {
         handleFirestoreError(error, OperationType.LIST, 'users/batches');
       } finally {
@@ -173,8 +202,13 @@ export function AdminStudents() {
 
   const handleStatusChange = async (uid: string, newStatus: string) => {
     try {
-      await updateDoc(doc(db, 'users', uid), { status: newStatus });
-      setStudents(students.map(s => s.uid === uid ? { ...s, status: newStatus as any } : s));
+      const updates: any = { status: newStatus };
+      if (newStatus === 'active') {
+        updates.createdAt = serverTimestamp();
+      }
+      await updateDoc(doc(db, 'users', uid), updates);
+      globalStudentsCache = null;
+      setStudents(students.map(s => s.uid === uid ? { ...s, status: newStatus as any, createdAt: newStatus === 'active' ? Timestamp.now() : s.createdAt } : s));
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
     }
@@ -183,6 +217,7 @@ export function AdminStudents() {
   const handleBatchChange = async (uid: string, batchId: string) => {
     try {
       await updateDoc(doc(db, 'users', uid), { batchId });
+      globalStudentsCache = null;
       setStudents(students.map(s => s.uid === uid ? { ...s, batchId } : s));
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
@@ -192,6 +227,7 @@ export function AdminStudents() {
   const handleDeleteStudent = async (uid: string) => {
     try {
       await deleteDoc(doc(db, 'users', uid));
+      globalStudentsCache = null;
       setStudents(students.filter(s => s.uid !== uid));
     } catch (error) {
        alert("Error deleting student: " + String(error));
@@ -638,7 +674,7 @@ export function AdminBatches() {
 
   const fetchBatches = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, 'batches'));
+      const querySnapshot = await cachedGetDocs(collection(db, 'batches'), 'all_batches');
       const data: Batch[] = [];
       querySnapshot.forEach((doc) => {
         data.push({ id: doc.id, ...doc.data() } as Batch);
@@ -665,6 +701,8 @@ export function AdminBatches() {
         schedule,
         createdAt: serverTimestamp()
       });
+      globalBatchesCache = null;
+      clearCache('all_batches');
       setName('');
       setSchedule('');
       await fetchBatches();
@@ -682,6 +720,8 @@ export function AdminBatches() {
         name: editName.trim(),
         schedule: editSchedule.trim()
       });
+      globalBatchesCache = null;
+      clearCache('all_batches');
       await fetchBatches();
       setEditingBatch(null);
     } catch (err) {
@@ -723,6 +763,8 @@ export function AdminBatches() {
       for (const b of batchesFn) await b.commit();
 
       await deleteDoc(doc(db, 'batches', id));
+      globalBatchesCache = null;
+      clearCache('all_batches');
       await fetchBatches();
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `batches/${id}`);
@@ -905,31 +947,41 @@ export function AdminPayments() {
   const fetchAll = async () => {
     try {
       setLoading(true);
-      const [pSnap, uSnap, bSnap] = await Promise.all([
-        getDocs(query(collection(db, 'payments'), orderBy('createdAt', 'desc'), limit(150))),
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'batches'))
-      ]);
       
+      const pSnap = await cachedGetDocs(query(collection(db, 'payments'), orderBy('createdAt', 'desc'), limit(150)), `all_payments_admin`);
       const pData: Payment[] = [];
       pSnap.forEach(d => pData.push({ id: d.id, ...d.data() } as Payment));
       const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
       pData.sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
       setPayments(pData);
 
-      const uData: any[] = [];
-      uSnap.forEach(d => {
-         const data = d.data();
-         if (data.role !== 'admin') {
-            const mFee = (data.monthlyFee === undefined || data.monthlyFee === null) ? 500 : data.monthlyFee;
-            uData.push({ id: d.id, ...data, monthlyFee: mFee });
-         }
-      });
-      setStudents(uData);
+      if (globalStudentsCache && globalBatchesCache && Date.now() - globalCacheTime < CACHE_TTL) {
+         setStudents(globalStudentsCache);
+         setBatches(globalBatchesCache);
+      } else {
+         const [uSnap, bSnap] = await Promise.all([
+           cachedGetDocs(collection(db, 'users'), 'all_users'),
+           cachedGetDocs(collection(db, 'batches'), 'all_batches')
+         ]);
 
-      const bData: any[] = [];
-      bSnap.forEach(d => bData.push({ id: d.id, ...d.data() }));
-      setBatches(bData);
+         const uData: any[] = [];
+         uSnap.forEach(d => {
+            const data = d.data();
+            if (data.role !== 'admin') {
+               const mFee = (data.monthlyFee === undefined || data.monthlyFee === null) ? 500 : data.monthlyFee;
+               uData.push({ id: d.id, ...data, monthlyFee: mFee });
+            }
+         });
+         setStudents(uData);
+         globalStudentsCache = uData;
+
+         const bData: any[] = [];
+         bSnap.forEach(d => bData.push({ id: d.id, ...d.data() }));
+         setBatches(bData);
+         globalBatchesCache = bData;
+         
+         globalCacheTime = Date.now();
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -1311,7 +1363,7 @@ export function StudentPayments() {
      const fetchPayments = async () => {
        try {
          const q = query(collection(db, 'payments'), where('studentId', '==', user.uid));
-         const snap = await getDocs(q);
+         const snap = await cachedGetDocs(q, `student_payments_${user.uid}`);
          const data: Payment[] = [];
          snap.forEach((doc) => {
            data.push({ id: doc.id, ...doc.data() } as Payment);
@@ -1410,6 +1462,9 @@ export function StudentPayments() {
         status: 'pending',
         createdAt: serverTimestamp()
       });
+      clearCache(`student_payments_${user.uid}`);
+      clearCache(`all_payments_${user.uid}`);
+      clearCache(`latest_payment_${user.uid}`);
       setSelectedMonths([]);
       setPaymentSuccess(true);
       setTimeout(() => setPaymentSuccess(false), 3000);

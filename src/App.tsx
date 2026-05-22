@@ -51,6 +51,7 @@ import { AdminResults } from "./pages/AdminResults";
 import { AdminSettings } from "./pages/AdminSettings";
 import { ProfileSetup } from "./pages/ProfileSetup";
 import { StudentLibrary } from "./pages/StudentLibrary";
+import { cachedGetDocs } from "./lib/cache";
 
 function ProtectedRoute({
   children,
@@ -205,36 +206,33 @@ function TopNav() {
   useEffect(() => {
     if (!user) return;
 
-    const fetchUnread = async () => {
-      try {
-        const q = query(collection(db, "notifications"), orderBy("createdAt", "desc"), limit(20));
-        const snap = await getDocs(q);
-        let notifs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        if (user.role === "student") {
-          notifs = notifs.filter(
-            (n: any) =>
-              n.senderId === user.uid ||
-              n.targetId === user.uid ||
-              n.type === "admin_to_all" ||
-              (n.type === "admin_to_batch" &&
-                n.batchId === (user as any).batchId),
-          );
-        }
-        const unread = notifs.filter(
-          (n: any) =>
-            n.senderId !== user.uid && !(n.readers || []).includes(user.uid),
-        ).length;
-        setUnreadCount(unread);
-      } catch(err) {
-        console.error("Notifications fetch error", err);
-      }
-    };
+    const q = query(
+      collection(db, "notifications"),
+      orderBy("createdAt", "desc"),
+      limit(20)
+    );
 
-    fetchUnread();
-    
-    const poll = setInterval(fetchUnread, 300000); // Poll every 5 minutes
-    
-    return () => clearInterval(poll);
+    const unsubscribe = onSnapshot(q, (snap) => {
+      let notifs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      if (user.role === "student") {
+        notifs = notifs.filter(
+          (n: any) =>
+            n.senderId === user.uid ||
+            n.targetId === user.uid ||
+            n.type === "admin_to_all" ||
+            (n.type === "admin_to_batch" && n.batchId === (user as any).batchId),
+        );
+      }
+      const unread = notifs.filter(
+        (n: any) =>
+          n.senderId !== user.uid && !(n.readers || []).includes(user.uid),
+      ).length;
+      setUnreadCount(unread);
+    }, (err) => {
+      console.error("Notifications fetch error", err);
+    });
+
+    return () => unsubscribe();
   }, [user?.uid, user?.role, (user as any)?.batchId]);
 
   const handleEditProfileOpen = () => {
@@ -701,6 +699,7 @@ function StudentDashboard() {
   const { user } = useAuth();
   const [exams, setExams] = useState<Exam[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [absentCount, setAbsentCount] = useState<number>(0);
   const [paymentStatus, setPaymentStatus] = useState<{
     status: string;
     label: string;
@@ -730,7 +729,7 @@ function StudentDashboard() {
     if (user && (user as any).pendingMonths > 0) {
         // Pending months check moved to second useEffect to prevent flashing
     }
-  }, [user]);
+  }, [user?.uid, (user as any)?.showPaymentNudge, (user as any)?.monthlyFee, (user as any)?.pendingMonths]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -747,14 +746,14 @@ function StudentDashboard() {
               orderBy("createdAt", "desc"),
               limit(1)
             );
-            const paySnaps = await getDocs(payQ);
+            const paySnaps = await cachedGetDocs(payQ, `latest_payment_${user.uid}`);
             paySnaps.forEach((d) =>
               pData.push({ id: d.id, ...d.data() } as Payment),
             );
         } catch (idxErr: any) {
             // Fallback if missing composite index
             const fallbackQ = query(collection(db, "payments"), where("studentId", "==", user.uid));
-            const paySnaps = await getDocs(fallbackQ);
+            const paySnaps = await cachedGetDocs(fallbackQ, `all_payments_${user.uid}`);
             paySnaps.forEach((d) =>
               pData.push({ id: d.id, ...d.data() } as Payment),
             );
@@ -815,7 +814,7 @@ function StudentDashboard() {
         );
         
         const fetchAssignments = async () => {
-           const assignSnaps = await getDocs(assignQ);
+           const assignSnaps = await cachedGetDocs(assignQ, `assignments_${user.batchId}`);
            const assigns = assignSnaps.docs.map((d) => ({
              id: d.id,
              ...(d.data() as any),
@@ -839,7 +838,8 @@ function StudentDashboard() {
                  collection(db, "library"),
                  where("__name__", "in", chunk),
                );
-               const libSnaps = await getDocs(libQ);
+               chunk.sort();
+              const libSnaps = await cachedGetDocs(libQ, `lib_chunk_${chunk.join('_')}`);
                libSnaps.forEach((d) => allItems.push({ id: d.id, ...d.data() }));
              }
              const accessibleFiles = allItems.filter((i) => !i.isFolder);
@@ -858,6 +858,34 @@ function StudentDashboard() {
            }
         };
         fetchAssignments();
+        
+        const fetchAttendance = async () => {
+           try {
+             // Use dynamic import or existing util
+             const { getAllAttendanceForBatch } = await import('./lib/exam-session-utils');
+             const sBatchAtt = await getAllAttendanceForBatch(user.batchId, 3);
+             let recentAbsences = 0;
+             let validExamsChecked = 0;
+             for (let i = 0; i < sBatchAtt.length && validExamsChecked < 3; i++) {
+                const attDateMs = new Date(sBatchAtt[i].date).getTime();
+                const msJoined = (user as any).createdAt?.toMillis?.() || ((user as any).createdAt?.seconds ? (user as any).createdAt.seconds * 1000 : 0);
+                if (msJoined && attDateMs < msJoined - 86400000) {
+                   continue;
+                }
+                
+                validExamsChecked++;
+                if (!sBatchAtt[i].presentStudentIds.includes(user.uid)) {
+                   recentAbsences++;
+                } else {
+                   break;
+                }
+             }
+             setAbsentCount(recentAbsences);
+           } catch(err) {
+             console.error("Attendance fetch error:", err);
+           }
+        };
+        fetchAttendance();
       } catch (error) {
         console.error("Dashboard assignments fetch error:", error);
       }
@@ -968,6 +996,20 @@ function StudentDashboard() {
                   Joined Date:
                 </span>{" "}
                 <div className="font-bold">{user?.joinDate || "N/A"}</div>
+              </div>
+              <div className="sm:col-span-2">
+                <span className="font-bold text-zinc-500 uppercase text-xs block">
+                  Attendance Warning:
+                </span>{" "}
+                <div className="font-bold">
+                  {absentCount > 0 ? (
+                    <span className={absentCount >= 3 ? "text-red-500 font-black" : "text-yellow-600"}>
+                      You missed {absentCount} of the last 3 live exams!
+                    </span>
+                  ) : (
+                    <span className="text-emerald-500">Perfect recently. Keep it up!</span>
+                  )}
+                </div>
               </div>
             </div>
             <p className="text-[10px] uppercase font-bold text-red-500 mt-4 border border-red-200 bg-red-50 p-2 dark:bg-red-950/20 dark:border-red-900">
@@ -1153,9 +1195,9 @@ function StudentSimulatorWrapper() {
     if (authCtx.user?.role !== "admin") return;
     const fetchBatches = async () => {
       const q = query(collection(db, "batches"));
-      const snaps = await getDocs(q);
+      const snaps = await cachedGetDocs(q, "all_batches");
       const b: any[] = [];
-      snaps.forEach((d) => b.push({ id: d.id, name: d.data().name }));
+      snaps.forEach((d: any) => b.push({ id: d.id, name: d.data().name }));
       setBatches(b);
       if (b.length > 0 && !simulatedBatchId) {
         setSimulatedBatchId(b[0].id);
@@ -1163,7 +1205,7 @@ function StudentSimulatorWrapper() {
       }
     };
     fetchBatches();
-  }, [authCtx.user]);
+  }, [authCtx.user?.uid, authCtx.user?.role]);
 
   useEffect(() => {
     if (!simulatedBatchId || authCtx.user?.role !== "admin") {
@@ -1176,9 +1218,9 @@ function StudentSimulatorWrapper() {
           collection(db, "users"),
           where("batchId", "==", simulatedBatchId),
         );
-        const snaps = await getDocs(q);
+        const snaps = await cachedGetDocs(q, `batch_students_${simulatedBatchId}`);
         const students: any[] = [];
-        snaps.forEach((d) => {
+        snaps.forEach((d: any) => {
           if (d.data().role !== "admin") {
             students.push({ id: d.id, ...d.data() });
           }

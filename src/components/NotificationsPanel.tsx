@@ -3,6 +3,7 @@ import { X, Bell, Plus, Edit, Trash2, CheckCircle, Loader2 } from 'lucide-react'
 import { useAuth } from './AuthProvider';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, arrayUnion, limit } from 'firebase/firestore';
+import { cachedGetDocs } from '../lib/cache';
 
 export function NotificationsPanel({ onClose }: { onClose: () => void }) {
   const { user } = useAuth();
@@ -26,7 +27,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
     
     // Fetch batches for dropdown and mapping
     const fetchBatches = async () => {
-       const snap = await getDocs(collection(db, 'batches'));
+       const snap = await cachedGetDocs(query(collection(db, 'batches')), "all_batches");
        setBatches(snap.docs.map(doc => ({id: doc.id, ...doc.data()})));
     };
     fetchBatches();
@@ -45,7 +46,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
     }
 
     const fetchNotifs = async () => {
-       const snap = await getDocs(q);
+       const snap = await cachedGetDocs(q, `notifications_${user.uid}`);
        let notifs = snap.docs.map(doc => ({id: doc.id, ...(doc.data() as any)}));
        if (user.role === 'student') {
           // Client side filter

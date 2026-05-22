@@ -7,6 +7,7 @@ import { PageHeader } from './Pages';
 import { Loader2, Plus, Eye, Share2, Trash2, FileText, FileDown, BookOpen, Folder, FolderPlus, ChevronRight, Pencil } from 'lucide-react';
 import { useAuth } from '../components/AuthProvider';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
+import { cachedGetDocs } from '../lib/cache';
 
 export interface LibraryItem {
   id: string;
@@ -126,7 +127,7 @@ export function AdminLibrary() {
         } else {
             q = query(collection(db, 'library'), where('parentId', '==', folderId));
         }
-        const snap = await getDocs(q);
+        const snap = await cachedGetDocs(q, `admin_lib_folder_${folderId || 'root'}`);
         const fetchedItems: LibraryItem[] = [];
         snap.forEach(d => fetchedItems.push({ id: d.id, ...(d.data() as any) } as LibraryItem));
         
@@ -163,7 +164,7 @@ export function AdminLibrary() {
   const fetchBatches = async () => {
     try {
       const q = query(collection(db, 'batches'));
-      const snap = await getDocs(q);
+      const snap = await cachedGetDocs(q, 'all_batches');
       const data: any[] = [];
       snap.forEach(d => data.push({ id: d.id, name: d.data().name }));
       setBatches(data);
@@ -623,7 +624,7 @@ export function AdminLibrary() {
      setIsShareModalOpen(true);
      try {
          const q = query(collection(db, 'batchAssignments'), where('libraryItemId', '==', item.id));
-         const snaps = await getDocs(q);
+         const snaps = await cachedGetDocs(q, `assignments_lib_${item.id}`);
          const alreadyAssigned = snaps.docs.map(d => ({id: d.id, ...d.data()}) as any);
          setItemAssignments(alreadyAssigned);
          
@@ -755,6 +756,7 @@ export function AdminLibrary() {
           );
         }
       });
+      if (sessionUnsubscribeRef.current) sessionUnsubscribeRef.current();
       sessionUnsubscribeRef.current = unsubscribe;
     } catch (err) {
       console.error('Failed to start session:', err);
@@ -841,6 +843,7 @@ export function AdminLibrary() {
                           );
                         }
                       });
+                      if (sessionUnsubscribeRef.current) sessionUnsubscribeRef.current();
                       sessionUnsubscribeRef.current = unsubscribe;
                    }}
                    className="px-3 py-1 bg-yellow-500 text-black border border-black hover:bg-yellow-400 text-xs shadow-[2px_2px_0px_0px_black] active:translate-y-[2px] active:translate-x-[2px] active:shadow-none transition-all"
@@ -978,7 +981,7 @@ export function AdminLibrary() {
                           setSubmitting(true);
                           try {
                              const q = query(collection(db, 'batchAssignments'), where('libraryItemId', '==', item.id));
-                             const snaps = await getDocs(q);
+                             const snaps = await cachedGetDocs(q, `assignments_lib_${item.id}`);
                              setItemAssignments(snaps.docs.map(d => ({id: d.id, ...d.data()} as any)));
                           } catch(err) {}
                           setSubmitting(false);

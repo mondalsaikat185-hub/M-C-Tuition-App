@@ -66,7 +66,7 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
        }
     };
     checkPrevious();
-  }, [user, exam.id]);
+  }, [user?.uid, exam.id, isPreview]);
 
   // Anti-cheat listener
   useEffect(() => {

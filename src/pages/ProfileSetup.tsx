@@ -7,10 +7,12 @@ import {
   serverTimestamp,
   collection,
   getDocs,
+  query,
   addDoc,
 } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { handleFirestoreError, OperationType } from "../lib/firestore-error";
+import { cachedGetDocs } from "../lib/cache";
 import { Loader2 } from "lucide-react";
 
 export function ProfileSetup() {
@@ -35,13 +37,13 @@ export function ProfileSetup() {
       if (!joinDate && user.joinDate) setJoinDate(user.joinDate);
       if (!batchId && user.batchId) setBatchId(user.batchId);
     }
-  }, [user]);
+  }, [user?.uid, user?.fullName, user?.displayName, user?.phone, user?.dob, user?.address, user?.joinDate, user?.batchId]);
 
   useEffect(() => {
     const fetchBatches = async () => {
       try {
         const q = collection(db, "batches");
-        const snaps = await getDocs(q);
+        const snaps = await cachedGetDocs(query(q), "all_batches");
         const b: any[] = [];
         snaps.forEach((d) => b.push({ id: d.id, name: d.data().name }));
         setBatches(b);

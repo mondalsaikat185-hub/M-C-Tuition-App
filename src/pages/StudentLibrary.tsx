@@ -8,6 +8,7 @@ import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
 import { LibraryItem } from './AdminLibrary';
 import { verifyAndJoinSession, joinSessionWithoutCode } from '../lib/exam-session-utils';
 import { useSearchParams } from 'react-router-dom';
+import { cachedGetDocs } from '../lib/cache';
 
 export function StudentLibrary() {
   const { user } = useAuth();
@@ -105,7 +106,7 @@ export function StudentLibrary() {
     setLoading(true);
     try {
         const q = query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId));
-        const assignSnaps = await getDocs(q);
+        const assignSnaps = await cachedGetDocs(q, `assignments_${user.batchId}`);
         const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()} as any));
         assigns.sort((a,b) => {
             const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
@@ -196,7 +197,8 @@ export function StudentLibrary() {
         let currentCache = new Map<string, LibraryItem>();
         setLibraryCache((prev: Map<string, LibraryItem>) => { currentCache = new Map(prev); return prev; });
         
-        const missingIds = neededRootIds.filter(id => !currentCache.has(id));
+        let missingIds = neededRootIds.filter(id => !currentCache.has(id));
+        missingIds.sort(); // Sort to ensure stable chunk cache keys
 
         if (missingIds.length > 0) {
            setLoading(true);
@@ -211,7 +213,8 @@ export function StudentLibrary() {
                for (const chunk of chunks) {
                    try {
                      const q = query(collection(db, 'library'), where('__name__', 'in', chunk));
-                     const snaps = await getDocs(q);
+                     chunk.sort();
+                     const snaps = await cachedGetDocs(q, `lib_chunk_${chunk.join('_')}`);
                      
                      // Stop infinite fetching for deleted library items that are still assigned
                      const foundIds = new Set(snaps.docs.map(s => s.id));
@@ -251,7 +254,7 @@ export function StudentLibrary() {
           setLoading(true);
           try {
              const q = query(collection(db, 'library'), where('parentId', '==', folderId));
-             const snaps = await getDocs(q);
+             const snaps = await cachedGetDocs(q, `lib_folder_${folderId}`);
              const newCache = new Map(libraryCache);
              snaps.forEach(snap => {
                 const data = snap.data();
@@ -518,25 +521,13 @@ export function StudentLibrary() {
             return;
          }
 
-         const CACHE_TTL = 60 * 1000;
-         const cached = sessionCacheRef.current.get(item.id);
-         let snap: any;
+         const q = query(
+            collection(db, 'examSessions'),
+            where('examId', '==', item.id)
+         );
+         const realSnap = await getDocs(q);
 
-         if (cached && Date.now() - cached.time < CACHE_TTL) {
-             snap = { docs: cached.data };
-         } else {
-             const q = query(
-                collection(db, 'examSessions'),
-                where('examId', '==', item.id)
-             );
-             const realSnap = await getDocs(q);
-             // Manually create an array of "docs" with data() so we can cache safely
-             const docsArray = realSnap.docs.map(d => ({ data: () => d.data(), id: d.id }));
-             sessionCacheRef.current.set(item.id, { data: docsArray, time: Date.now() });
-             snap = { docs: docsArray };
-         }
-
-         const batchSessionDocs = snap.docs.filter((doc: any) => doc.data().batchId === (user as any).batchId);
+         const batchSessionDocs = realSnap.docs.filter((doc: any) => doc.data().batchId === (user as any).batchId);
          const activeSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === true);
          const endedSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === false);
 
