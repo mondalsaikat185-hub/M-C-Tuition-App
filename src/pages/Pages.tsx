@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Check, X, Loader2, Trash2, Plus, Search } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { collection, getDocs, getDoc, doc, updateDoc, setDoc, query, where, addDoc, deleteDoc, serverTimestamp, writeBatch, Timestamp, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, updateDoc, setDoc, query, where, addDoc, deleteDoc, serverTimestamp, writeBatch, Timestamp, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { AppUser, useAuth } from '../components/AuthProvider';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
@@ -906,7 +906,7 @@ export function AdminPayments() {
     try {
       setLoading(true);
       const [pSnap, uSnap, bSnap] = await Promise.all([
-        getDocs(collection(db, 'payments')),
+        getDocs(query(collection(db, 'payments'), orderBy('createdAt', 'desc'), limit(150))),
         getDocs(collection(db, 'users')),
         getDocs(collection(db, 'batches'))
       ]);

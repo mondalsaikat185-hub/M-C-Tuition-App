@@ -100,29 +100,29 @@ export function StudentLibrary() {
     } catch(e) { }
   }, [libraryCache]);
 
-  useEffect(() => {
-    if (!user?.batchId) {
-       setLoading(false);
-       return;
-    }
+  const fetchAssignments = async () => {
+    if (!user?.batchId) return;
     setLoading(true);
+    try {
+        const q = query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId));
+        const assignSnaps = await getDocs(q);
+        const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()} as any));
+        assigns.sort((a,b) => {
+            const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+            const tA = getMs(a.assignedAt);
+            const tB = getMs(b.assignedAt);
+            return tB - tA;
+        });
+        setAllAssigns(assigns);
+    } catch(err) {
+        console.error(err);
+    } finally {
+        setLoading(false);
+    }
+  };
 
-    const q = query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId));
-    const unsubscribe = onSnapshot(q, (assignSnaps) => {
-       const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()} as any));
-       assigns.sort((a,b) => {
-           const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
-           const tA = getMs(a.assignedAt);
-           const tB = getMs(b.assignedAt);
-           return tB - tA;
-       });
-       setAllAssigns(assigns);
-    }, (err) => {
-       console.error(err);
-       setLoading(false);
-    });
-
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchAssignments();
   }, [user?.batchId]);
 
   // Derive visible items synchronously
@@ -212,6 +212,16 @@ export function StudentLibrary() {
                    try {
                      const q = query(collection(db, 'library'), where('__name__', 'in', chunk));
                      const snaps = await getDocs(q);
+                     
+                     // Stop infinite fetching for deleted library items that are still assigned
+                     const foundIds = new Set(snaps.docs.map(s => s.id));
+                     chunk.forEach(id => {
+                         if (!foundIds.has(id)) {
+                             // Document doesn't exist, cache a dummy entry so we don't query it again
+                             currentCache.set(id, { id, title: 'Deleted Item', type: 'folder', isFolder: true } as any);
+                         }
+                     });
+
                      snaps.forEach(snap => {
                         const data = { id: snap.id, ...snap.data() } as LibraryItem;
                         if (data.isChunked) return;

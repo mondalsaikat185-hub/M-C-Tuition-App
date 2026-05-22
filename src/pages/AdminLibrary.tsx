@@ -33,7 +33,7 @@ export function AdminLibrary() {
   const { user } = useAuth();
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [batches, setBatches] = useState<{id: string, name: string}[]>([]);
-  const [assignments, setAssignments] = useState<{id: string, libraryItemId: string, batchId: string}[]>([]);
+  const [itemAssignments, setItemAssignments] = useState<{id: string, libraryItemId: string, batchId: string, scheduledStartTime?: string}[]>([]);
   const [loading, setLoading] = useState(true);
 
   // ExamSession
@@ -73,6 +73,7 @@ export function AdminLibrary() {
 
   // Navigation and Folders
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [folderBreadcrumbs, setFolderBreadcrumbs] = useState<LibraryItem[]>([]);
   
   // Modals
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
@@ -107,29 +108,56 @@ export function AdminLibrary() {
   const [editItemTitle, setEditItemTitle] = useState('');
   const [autoExtractMsg, setAutoExtractMsg] = useState('');
 
+  const [loadedFolders, setLoadedFolders] = useState<Set<string | null>>(new Set());
+
   useEffect(() => {
     fetchBatches();
-    fetchAssignments();
-    
-    // onSnapshot is much better here because it uses local indexedDB cache instantly
-    // and only charges read quotas for records that changed since the last fetch.
-    const q = query(collection(db, 'library'));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const data: LibraryItem[] = [];
-      snap.forEach(d => data.push({ id: d.id, ...d.data() } as LibraryItem));
-      const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
-      data.sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
-      setItems(data);
-      setLoading(false);
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'library');
-      setLoading(false);
-    });
-    
-    return () => unsubscribe();
   }, []);
 
-  // Remove the old manual fetchLibrary function entirely
+  const fetchFolderContent = async (folderId: string | null, forceRefresh = false) => {
+    if (!forceRefresh && loadedFolders.has(folderId)) {
+        return; // Already fetched in this session
+    }
+    setLoading(true);
+    try {
+        let q;
+        if (folderId === null) {
+            q = query(collection(db, 'library'), where('parentId', '==', null));
+        } else {
+            q = query(collection(db, 'library'), where('parentId', '==', folderId));
+        }
+        const snap = await getDocs(q);
+        const fetchedItems: LibraryItem[] = [];
+        snap.forEach(d => fetchedItems.push({ id: d.id, ...(d.data() as any) } as LibraryItem));
+        
+        setItems(prev => {
+            const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+            // Remove old entries for this folder and append the fresh ones
+            const withoutCurrentFolder = prev.filter(p => (p.parentId || null) !== folderId);
+            const updated = withoutCurrentFolder.concat(fetchedItems);
+            return updated.sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
+        });
+        
+        setLoadedFolders(prev => {
+            const next = new Set(prev);
+            next.add(folderId);
+            return next;
+        });
+    } catch(err: any) {
+        handleFirestoreError(err, OperationType.LIST, 'library');
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFolderContent(currentFolderId);
+  }, [currentFolderId]);
+
+  const handleRefreshFolder = () => {
+    fetchFolderContent(currentFolderId, true);
+  };
+
   // const fetchLibrary = async () => { ... } is replaced by the onSnapshot inside useEffect
 
   const fetchBatches = async () => {
@@ -142,18 +170,6 @@ export function AdminLibrary() {
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'batches');
     }
-  };
-
-  const fetchAssignments = async () => {
-      try {
-        const q = query(collection(db, 'batchAssignments'));
-        const snap = await getDocs(q);
-        const data: any[] = [];
-        snap.forEach(d => data.push({ id: d.id, ...d.data() }));
-        setAssignments(data);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, 'batchAssignments');
-      }
   };
 
   const handleFileExtraction = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -322,6 +338,7 @@ export function AdminLibrary() {
 
        setIsFolderModalOpen(false);
        setFolderName('');
+       handleRefreshFolder();
      } catch (err: any) {
        handleFirestoreError(err, OperationType.CREATE, 'library');
      } finally {
@@ -392,6 +409,7 @@ export function AdminLibrary() {
            
            setIsUploadModalOpen(false);
            resetForm();
+           handleRefreshFolder();
            return;
         }
 
@@ -452,6 +470,7 @@ export function AdminLibrary() {
                 setIsUploadModalOpen(false);
                 resetForm();
                 setUploadProgress('');
+                handleRefreshFolder();
               } catch (err: any) {
                  handleFirestoreError(err, OperationType.CREATE, 'libraryChunks');
                  setUploadProgress('');
@@ -471,6 +490,7 @@ export function AdminLibrary() {
            await addDoc(collection(db, 'library'), payload);
            setIsUploadModalOpen(false);
            resetForm();
+           handleRefreshFolder();
         }
 
      } catch (err: any) {
@@ -493,13 +513,33 @@ export function AdminLibrary() {
      setAutoExtractMsg('');
   };
 
-  const getItemsToDelete = (itemId: string, allItems: LibraryItem[]): string[] => {
-     let ids = [itemId];
-     const children = allItems.filter(i => i.parentId === itemId);
-     for (const child of children) {
-        ids = [...ids, ...getItemsToDelete(child.id, allItems)];
+  const getItemsToDelete = async (itemId: string): Promise<{id: string, isChunked?: boolean, chunkCount?: number}[]> => {
+     let itemsToDelete: {id: string, isChunked?: boolean, chunkCount?: number}[] = [{ id: itemId }];
+     try {
+       // Also fetch the root item to know if it's chunked (in case it's in items array we already have it, but doing a check is safer)
+       const rootItem = items.find(i => i.id === itemId);
+       if (rootItem) {
+          itemsToDelete[0].isChunked = rootItem.isChunked;
+          itemsToDelete[0].chunkCount = rootItem.chunkCount;
+       }
+       
+       const q = query(collection(db, 'library'), where('parentId', '==', itemId));
+       const snap = await getDocs(q);
+       for (const doc of snap.docs) {
+          const data = doc.data();
+          itemsToDelete.push({ id: doc.id, isChunked: data.isChunked, chunkCount: data.chunkCount });
+          // If it's a folder, recursively get children
+          if (data.isFolder) {
+              const subIds = await getItemsToDelete(doc.id);
+              // Shift the first one (which is doc.id we already pushed) to avoid duplicates, or just push all
+              // wait, getItemsToDelete returns doc.id as the first element. So we skip index 0.
+              itemsToDelete = [...itemsToDelete, ...subIds.slice(1)];
+          }
+       }
+     } catch(err) {
+       console.error("Error fetching children for delete", err);
      }
-     return ids;
+     return itemsToDelete;
   };
 
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
@@ -508,7 +548,7 @@ export function AdminLibrary() {
      try {
        setSubmitting(true);
        
-       const idsToDelete = getItemsToDelete(id, items);
+       const itemsToDelete = await getItemsToDelete(id);
        
        let currentBatch = writeBatch(db);
        let opCount = 0;
@@ -521,18 +561,19 @@ export function AdminLibrary() {
           }
        };
 
-       for (const delId of idsToDelete) {
-           const assigns = assignments.filter(a => a.libraryItemId === delId);
-           for (const a of assigns) {
+       for (const item of itemsToDelete) {
+           const delId = item.id;
+           const qAssign = query(collection(db, 'batchAssignments'), where('libraryItemId', '==', delId));
+           const snapAssign = await getDocs(qAssign);
+           for (const a of snapAssign.docs) {
               currentBatch.delete(doc(db, 'batchAssignments', a.id));
               opCount++;
               if (opCount >= 490) await commitBatch();
            }
            
            // Cleanup chunks if it's chunked
-           const itemToDelete = items.find(i => i.id === delId);
-           if (itemToDelete?.isChunked && itemToDelete?.chunkCount) {
-              for (let i = 0; i < itemToDelete.chunkCount; i++) {
+           if (item.isChunked && item.chunkCount) {
+              for (let i = 0; i < item.chunkCount; i++) {
                  currentBatch.delete(doc(db, 'libraryChunks', `${delId}_${i}`));
                  opCount++;
                  if (opCount >= 490) await commitBatch();
@@ -545,8 +586,8 @@ export function AdminLibrary() {
        }
        await commitBatch();
        
-       fetchAssignments().catch(err => console.error(err));
        setDeleteItemId(null);
+       handleRefreshFolder();
      } catch (err: any) {
        console.error(err);
        alert("Error deleting: " + String(err.message || err));
@@ -563,6 +604,7 @@ export function AdminLibrary() {
         await setDoc(doc(db, 'library', editItemId), { title: editItemTitle.trim() }, { merge: true });
         setEditItemId(null);
         setEditItemTitle('');
+        handleRefreshFolder();
      } catch (err: any) {
         alert("Error updating: " + String(err.message || err));
      } finally {
@@ -575,19 +617,31 @@ export function AdminLibrary() {
   const [currentSharedBatchIds, setCurrentSharedBatchIds] = useState<string[]>([]);
   const [shareBatchSettings, setShareBatchSettings] = useState<Record<string, { scheduledStartTime?: string }>>({});
   
-  const openShareModal = (item: LibraryItem) => {
+  const openShareModal = async (item: LibraryItem) => {
      setSelectedItem(item);
-     const alreadyAssigned = assignments.filter(a => a.libraryItemId === item.id);
-     const batchIds = alreadyAssigned.map(a => a.batchId);
-     const settingsList: Record<string, { scheduledStartTime?: string }> = {};
-     alreadyAssigned.forEach(a => {
-         if (a.scheduledStartTime) {
-             settingsList[a.batchId] = { scheduledStartTime: a.scheduledStartTime };
-         }
-     });
-     setCurrentSharedBatchIds(batchIds);
-     setShareBatchSettings(settingsList);
+     setSubmitting(true);
      setIsShareModalOpen(true);
+     try {
+         const q = query(collection(db, 'batchAssignments'), where('libraryItemId', '==', item.id));
+         const snaps = await getDocs(q);
+         const alreadyAssigned = snaps.docs.map(d => ({id: d.id, ...d.data()}) as any);
+         setItemAssignments(alreadyAssigned);
+         
+         const batchIds = alreadyAssigned.map(a => a.batchId);
+         const settingsList: Record<string, { scheduledStartTime?: string }> = {};
+         alreadyAssigned.forEach(a => {
+             if (a.scheduledStartTime) {
+                 settingsList[a.batchId] = { scheduledStartTime: a.scheduledStartTime };
+             }
+         });
+         setCurrentSharedBatchIds(batchIds);
+         setShareBatchSettings(settingsList);
+     } catch (err: any) {
+         console.error(err);
+         alert("Could not load sharing data.");
+     } finally {
+         setSubmitting(false);
+     }
   };
 
   const toggleBatchShare = (batchId: string) => {
@@ -607,7 +661,7 @@ export function AdminLibrary() {
      if (!selectedItem) return;
      try {
         setSubmitting(true);
-        const previouslyAssigned = assignments.filter(a => a.libraryItemId === selectedItem.id);
+        const previouslyAssigned = itemAssignments;
         
         const batchFn = writeBatch(db);
         
@@ -641,7 +695,6 @@ export function AdminLibrary() {
 
         await batchFn.commit();
         setIsShareModalOpen(false);
-        fetchAssignments().catch(err => console.error(err));
      } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, 'batchAssignments');
      } finally {
@@ -653,23 +706,8 @@ export function AdminLibrary() {
      return <UnifiedQuizPlayer exam={previewItem as any} onBack={() => setPreviewItem(null)} />;
   }
 
-  const getBreadcrumbs = () => {
-     const crumbs: {id: string, title: string}[] = [];
-     let curr = currentFolderId;
-     while (curr) {
-        const folder = items.find(i => i.id === curr);
-        if (folder) {
-           crumbs.unshift({ id: folder.id, title: folder.title });
-           curr = folder.parentId || null;
-        } else {
-           break;
-        }
-     }
-     return crumbs;
-  };
-
-  const breadcrumbs = getBreadcrumbs();
-  const currentItems = items.filter(i => (i.parentId || null) === currentFolderId);
+  const breadcrumbs = folderBreadcrumbs.map(b => ({ id: b.id, title: b.title }));
+  const currentItems = items;
   const folders = currentItems.filter(i => i.isFolder).sort((a,b) => a.title.localeCompare(b.title));
   const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
   const files = currentItems.filter(i => !i.isFolder).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
@@ -746,8 +784,15 @@ export function AdminLibrary() {
 
   const handleBackNavigation = () => {
      if (currentFolderId) {
-        const folder = items.find(i => i.id === currentFolderId);
-        setCurrentFolderId(folder?.parentId || null);
+        if (folderBreadcrumbs.length > 0) {
+            const newBc = [...folderBreadcrumbs];
+            newBc.pop();
+            setFolderBreadcrumbs(newBc);
+            const parent = newBc.length > 0 ? newBc[newBc.length - 1] : null;
+            setCurrentFolderId(parent ? parent.id : null);
+        } else {
+            setCurrentFolderId(null);
+        }
      }
   };
 
@@ -809,13 +854,13 @@ export function AdminLibrary() {
       )}
 
       <div className="flex gap-2 items-center mb-6 overflow-x-auto text-sm font-bold pb-2 text-zinc-600 dark:text-zinc-400">
-         <button onClick={() => setCurrentFolderId(null)} className="hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1 shrink-0">
+         <button onClick={() => { setCurrentFolderId(null); setFolderBreadcrumbs([]); }} className="hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center gap-1 shrink-0">
             <Folder className="w-4 h-4"/> Home
          </button>
-         {breadcrumbs.map(bc => (
+         {folderBreadcrumbs.map((bc, idx) => (
              <React.Fragment key={bc.id}>
                 <ChevronRight className="w-4 h-4 shrink-0" />
-                <button onClick={() => setCurrentFolderId(bc.id)} className="hover:text-zinc-900 dark:hover:text-zinc-100 shrink-0">
+                <button onClick={() => { setCurrentFolderId(bc.id); setFolderBreadcrumbs(prev => prev.slice(0, idx + 1)); }} className="hover:text-zinc-900 dark:hover:text-zinc-100 shrink-0">
                    {bc.title}
                 </button>
              </React.Fragment>
@@ -824,7 +869,7 @@ export function AdminLibrary() {
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <h3 className="font-black text-xl md:text-2xl uppercase">
-           {currentFolderId ? items.find(i => i.id === currentFolderId)?.title : 'Library Root'}
+           {currentFolderId && folderBreadcrumbs.length > 0 ? folderBreadcrumbs[folderBreadcrumbs.length - 1]?.title : 'Library Root'}
         </h3>
         <div className="flex gap-2 w-full sm:w-auto">
           <button 
@@ -854,6 +899,7 @@ export function AdminLibrary() {
                      // don't navigate if clicking delete
                      if ((e.target as HTMLElement).closest('.action-btn')) return;
                      setCurrentFolderId(folder.id);
+                     setFolderBreadcrumbs(prev => [...prev, folder]);
                   }}>
                      <div className="flex items-center gap-3 w-full">
                         <Folder className="w-6 h-6 text-blue-500 shrink-0" fill="currentColor" />
@@ -902,7 +948,7 @@ export function AdminLibrary() {
                      </label>
                   )}
                   <div className="text-xs text-blue-600 dark:text-blue-400 font-bold mt-1">
-                     Shared with {assignments.filter(a => a.libraryItemId === item.id).length} batches
+                     <button onClick={() => openShareModal(item)} className="hover:underline">Manage Sharing</button>
                   </div>
                </div>
                
@@ -927,7 +973,16 @@ export function AdminLibrary() {
                        <FileText className="w-3.5 h-3.5" /> Results
                      </a>
                      <button
-                       onClick={() => setSessionBatchPickerItem(item)}
+                       onClick={async () => {
+                          setSessionBatchPickerItem(item);
+                          setSubmitting(true);
+                          try {
+                             const q = query(collection(db, 'batchAssignments'), where('libraryItemId', '==', item.id));
+                             const snaps = await getDocs(q);
+                             setItemAssignments(snaps.docs.map(d => ({id: d.id, ...d.data()} as any)));
+                          } catch(err) {}
+                          setSubmitting(false);
+                       }}
                        className="flex items-center gap-1 bg-green-400 border border-black font-bold text-xs px-3 py-1.5 shadow-[2px_2px_0px_black] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px] transition-all whitespace-nowrap text-black"
                        title="Start Exam Session"
                      >
@@ -1171,7 +1226,7 @@ export function AdminLibrary() {
                {/* Checkbox removed */}
 
                <div className="space-y-2 mb-6 max-h-60 overflow-y-auto">
-                 {batches.filter(b => assignments.some(a => a.libraryItemId === sessionBatchPickerItem.id && a.batchId === b.id)).map(b => (
+                 {batches.filter(b => itemAssignments.some(a => a.batchId === b.id)).map(b => (
                     <button
                       key={b.id}
                       onClick={() => handleStartSession(b.id)}
@@ -1181,7 +1236,7 @@ export function AdminLibrary() {
                       <span className="text-xs bg-black text-white px-2 py-1">▶ Start</span>
                     </button>
                  ))}
-                 {batches.filter(b => assignments.some(a => a.libraryItemId === sessionBatchPickerItem.id && a.batchId === b.id)).length === 0 && (
+                 {batches.filter(b => itemAssignments.some(a => a.batchId === b.id)).length === 0 && (
                    <p className="text-sm font-bold text-red-500">First share this exam to a batch.</p>
                  )}
                </div>

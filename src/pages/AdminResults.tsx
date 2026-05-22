@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, orderBy, where, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, where, deleteDoc, doc, writeBatch, limit } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { PageHeader } from './Pages';
 import { Loader2, Trash2, Search } from 'lucide-react';
@@ -34,18 +34,8 @@ export function AdminResults() {
         if (!examId && bData.length > 0 && !activeBatchId) {
            setActiveBatchId(bData[0].id);
         }
-
-        const uSnap = await getDocs(collection(db, 'users'));
-        const userDict: Record<string, any> = {};
-        uSnap.forEach(d => { 
-           userDict[d.id] = {
-              name: d.data().fullName || d.data().displayName || d.data().email || 'Unknown',
-              batchId: d.data().batchId
-           }; 
-        });
-        userDictRef.current = userDict;
       } catch (error) {
-        console.error("fetchUsersAndBatches error:", error);
+        console.error("fetchBatches error:", error);
       }
 
       try {
@@ -54,7 +44,7 @@ export function AdminResults() {
         if (examId) {
            q = query(collection(db, 'results'), where('examId', '==', examId));
         } else {
-           q = query(collection(db, 'results'), orderBy('createdAt', 'desc'));
+           q = query(collection(db, 'results'), orderBy('createdAt', 'desc'), limit(100)); // Limit to 100 recent results by default to save quota
         }
         
         const qSnap = await getDocs(q);
@@ -65,11 +55,29 @@ export function AdminResults() {
            data.push({ id: d.id, ...dData });
         });
 
+        // Lazily fetch missing users to prevent massive quota usage
+        const uniqueUserIds = Array.from(new Set(data.map(r => r.studentId).filter(id => !userDictRef.current[id])));
+        try {
+           for (let i = 0; i < uniqueUserIds.length; i += 30) {
+               const chunk = uniqueUserIds.slice(i, i + 30);
+               const uQuery = query(collection(db, 'users'), where('__name__', 'in', chunk));
+               const uSnap = await getDocs(uQuery);
+               uSnap.forEach(d => {
+                   userDictRef.current[d.id] = {
+                       name: d.data().fullName || d.data().displayName || d.data().email || 'Unknown',
+                       batchId: d.data().batchId
+                   };
+               });
+           }
+        } catch(err) {
+           console.error("Error fetching chunked users", err);
+        }
+
         // Match students using userDictRef
         data.forEach(r => {
            const cachedUser = userDictRef.current[r.studentId] || {};
-           r.studentName = cachedUser.name || r.studentName || 'Unknown Student';
-           r.studentBatchId = cachedUser.batchId || null;
+           r.studentName = r.studentName || cachedUser.name || 'Unknown Student';
+           r.studentBatchId = r.studentBatchId || cachedUser.batchId || null;
            r.formattedDate = r.createdAt?.toDate().toLocaleDateString(undefined, {
               year: 'numeric',
               month: 'short',

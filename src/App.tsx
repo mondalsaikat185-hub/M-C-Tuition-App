@@ -207,7 +207,7 @@ function TopNav() {
 
     const fetchUnread = async () => {
       try {
-        const q = query(collection(db, "notifications"), limit(20));
+        const q = query(collection(db, "notifications"), orderBy("createdAt", "desc"), limit(20));
         const snap = await getDocs(q);
         let notifs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         if (user.role === "student") {
@@ -231,6 +231,10 @@ function TopNav() {
     };
 
     fetchUnread();
+    
+    const poll = setInterval(fetchUnread, 300000); // Poll every 5 minutes
+    
+    return () => clearInterval(poll);
   }, [user?.uid, user?.role, (user as any)?.batchId]);
 
   const handleEditProfileOpen = () => {
@@ -735,21 +739,33 @@ function StudentDashboard() {
 
     const fetchPayment = async () => {
       try {
-        const payQ = query(
-          collection(db, "payments"),
-          where("studentId", "==", user.uid),
-        );
-        const paySnaps = await getDocs(payQ);
-        const pData: Payment[] = [];
-        paySnaps.forEach((d) =>
-          pData.push({ id: d.id, ...d.data() } as Payment),
-        );
+        let pData: Payment[] = [];
+        try {
+            const payQ = query(
+              collection(db, "payments"),
+              where("studentId", "==", user.uid),
+              orderBy("createdAt", "desc"),
+              limit(1)
+            );
+            const paySnaps = await getDocs(payQ);
+            paySnaps.forEach((d) =>
+              pData.push({ id: d.id, ...d.data() } as Payment),
+            );
+        } catch (idxErr: any) {
+            // Fallback if missing composite index
+            const fallbackQ = query(collection(db, "payments"), where("studentId", "==", user.uid));
+            const paySnaps = await getDocs(fallbackQ);
+            paySnaps.forEach((d) =>
+              pData.push({ id: d.id, ...d.data() } as Payment),
+            );
+            pData.sort((a, b) => {
+              const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
+              return getMs(b.createdAt) - getMs(a.createdAt);
+            });
+            if (pData.length > 1) pData = [pData[0]];
+        }
 
         if (pData.length > 0) {
-          pData.sort((a, b) => {
-            const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
-            return getMs(b.createdAt) - getMs(a.createdAt);
-          });
           const latest = pData[0];
           if (latest.status === "pending") {
             setPaymentStatus({
@@ -798,7 +814,8 @@ function StudentDashboard() {
           where("batchId", "==", user.batchId),
         );
         
-        unsubAssign = onSnapshot(assignQ, async (assignSnaps) => {
+        const fetchAssignments = async () => {
+           const assignSnaps = await getDocs(assignQ);
            const assigns = assignSnaps.docs.map((d) => ({
              id: d.id,
              ...(d.data() as any),
@@ -839,15 +856,12 @@ function StudentDashboard() {
              setExams(eData.slice(0, 3));
              setNotes(nData.slice(0, 5));
            }
-        });
+        };
+        fetchAssignments();
       } catch (error) {
         console.error("Dashboard assignments fetch error:", error);
       }
     }
-
-    return () => {
-      if (unsubAssign) unsubAssign();
-    };
   }, [user?.uid, user?.batchId]);
 
   if (user?.status === "pending") {

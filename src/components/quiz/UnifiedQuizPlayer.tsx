@@ -209,9 +209,13 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
     if (user && !isPreview) {
       // expireAt = 24 hours from now — Firebase TTL policy will auto-delete this document
       try {
+        const studentName = (user as any).fullName || user.displayName || user.email || 'Unknown Student';
+        const studentBatchId = (user as any).batchId || null;
         const expireAt = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
         await addDoc(collection(db, 'results'), {
            studentId: user.uid,
+           studentName,
+           studentBatchId,
            examId: exam.id,
            examTitle: exam.title,
            score,
