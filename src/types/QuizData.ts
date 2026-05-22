@@ -10,7 +10,7 @@ export type ExamType =
 export interface QuizConfig {
   totalTime: number; // in seconds
   marksCorrect: number;
-  marksWrong: number;
+  marksWrong: number; // typically represents a positive value (e.g. 0.5) that gets subtracted, though negative values (-0.5) will also be normalized
   maxQuestions: number;
 }
 

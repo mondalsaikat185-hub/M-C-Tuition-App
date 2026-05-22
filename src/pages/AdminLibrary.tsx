@@ -709,7 +709,7 @@ export function AdminLibrary() {
 
   const breadcrumbs = folderBreadcrumbs.map(b => ({ id: b.id, title: b.title }));
   const currentItems = items.filter(i => (i.parentId || null) === currentFolderId);
-  const folders = currentItems.filter(i => i.isFolder).sort((a,b) => a.title.localeCompare(b.title));
+  const folders = currentItems.filter(i => i.isFolder).sort((a,b) => (a.title || '').localeCompare(b.title || ''));
   const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
   const files = currentItems.filter(i => !i.isFolder).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
 

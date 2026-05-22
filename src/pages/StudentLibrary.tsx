@@ -154,6 +154,7 @@ export function StudentLibrary() {
       const addLoadedChildren = (parentId: string) => {
           const children = Array.from<LibraryItem>(libraryCache.values()).filter(i => i.parentId === parentId);
           for (const c of children) {
+              if (accessible.has(c.id)) continue;
               accessible.add(c.id);
               addLoadedChildren(c.id);
           }
@@ -165,7 +166,7 @@ export function StudentLibrary() {
       // Add ancestors to visibility
       const addAncestors = (itemId: string) => {
           const item = libraryCache.get(itemId);
-          if (item?.parentId) {
+          if (item?.parentId && !accessible.has(item.parentId)) {
               accessible.add(item.parentId);
               addAncestors(item.parentId);
           }
@@ -528,13 +529,28 @@ export function StudentLibrary() {
             return;
          }
 
-         const q = query(
-            collection(db, 'examSessions'),
-            where('examId', '==', item.id)
-         );
-         const realSnap = await getDocs(q);
-
-         const batchSessionDocs = realSnap.docs.filter((doc: any) => doc.data().batchId === (user as any).batchId);
+         let batchSessionDocs: any[] = [];
+         
+         try {
+            const q = query(
+               collection(db, 'examSessions'),
+               where('examId', '==', item.id),
+               where('batchId', '==', (user as any).batchId),
+               limit(10)
+            );
+            const realSnap = await getDocs(q);
+            batchSessionDocs = realSnap.docs;
+         } catch (idxError) {
+            // Fallback if composite index (examId + batchId) is missing
+            console.warn("Falling back to client-side filter for examSessions due to missing index.", idxError);
+            const q = query(
+               collection(db, 'examSessions'),
+               where('examId', '==', item.id),
+               limit(50)
+            );
+            const realSnap = await getDocs(q);
+            batchSessionDocs = realSnap.docs.filter((doc: any) => doc.data().batchId === (user as any).batchId);
+         }
          const activeSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === true);
          const endedSessionDocs = batchSessionDocs.filter(doc => doc.data().isActive === false);
 
@@ -669,39 +685,71 @@ export function StudentLibrary() {
   };
 
   const breadcrumbs = getBreadcrumbs();
-  const isFolderVisible = (folder: LibraryItem, mode: 'EXAM' | 'NOTE'): boolean => {
-     const checkContents = (parentId: string): boolean => {
-         const children = items.filter(i => i.parentId === parentId);
+  const folderVisibility = useMemo(() => {
+     const memo = new Map<string, { exam: boolean, note: boolean }>();
+     const childrenMap = new Map<string, LibraryItem[]>();
+     
+     for (const item of items) {
+         const pId = item.parentId || 'root';
+         if (!childrenMap.has(pId)) childrenMap.set(pId, []);
+         childrenMap.get(pId)!.push(item);
+     }
+
+     const checkVis = (folderId: string): { exam: boolean, note: boolean } => {
+         if (memo.has(folderId)) return memo.get(folderId)!;
+         
+         let hasExam = false;
+         let hasNote = false;
+         
+         // Temporary to prevent infinite loops on circular refs
+         memo.set(folderId, { exam: false, note: false }); 
+
+         const children = childrenMap.get(folderId) || [];
          for (const child of children) {
              if (!child.isFolder) {
-                 if (mode === 'EXAM' && child.type === 'exam') return true;
-                 if (mode === 'NOTE' && child.type !== 'exam') return true;
+                 if (child.type === 'exam') hasExam = true;
+                 else hasNote = true;
              } else {
-                 if (checkContents(child.id)) return true;
+                 const childVis = checkVis(child.id);
+                 if (childVis.exam) hasExam = true;
+                 if (childVis.note) hasNote = true;
              }
          }
-         return false;
+         
+         const res = { exam: hasExam, note: hasNote };
+         memo.set(folderId, res);
+         return res;
      };
-     
-     const hasMatchingContent = checkContents(folder.id);
-     if (!hasMatchingContent) {
-         if (mode === 'EXAM' && (folder.title.toLowerCase().includes('exam') || folder.title.toLowerCase().includes('test'))) return true;
-         if (mode === 'NOTE' && !(folder.title.toLowerCase().includes('exam') || folder.title.toLowerCase().includes('test'))) return true;
-         return false;
+
+     for (const item of items) {
+         if (item.isFolder) checkVis(item.id);
      }
-     return true;
+     return memo;
+  }, [items]);
+
+  const isFolderVisible = (folder: LibraryItem, mode: 'EXAM' | 'NOTE'): boolean => {
+      const vis = folderVisibility.get(folder.id);
+      const hasMatchingContent = vis ? (mode === 'EXAM' ? vis.exam : vis.note) : false;
+      
+      if (!hasMatchingContent) {
+          const t = folder.title?.toLowerCase() || '';
+          if (mode === 'EXAM' && (t.includes('exam') || t.includes('test'))) return true;
+          if (mode === 'NOTE' && !(t.includes('exam') || t.includes('test'))) return true;
+          return false;
+      }
+      return true;
   };
 
   const currentItems = items.filter(i => 
     searchQuery 
-     ? i.title.toLowerCase().includes(searchQuery.toLowerCase()) && (libraryMode === 'NOTE' ? i.type !== 'exam' : i.type === 'exam')
+     ? (i.title?.toLowerCase() || '').includes(searchQuery.toLowerCase()) && (libraryMode === 'NOTE' ? i.type !== 'exam' : i.type === 'exam')
      : (i.parentId || null) === currentFolderId && (
          (i.isFolder && isFolderVisible(i, libraryMode as 'EXAM' | 'NOTE')) || 
          (!i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam'))
        )
   );
   const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
-  const folders = currentItems.filter(i => i.isFolder).sort((a,b) => a.title.localeCompare(b.title));
+  const folders = currentItems.filter(i => i.isFolder).sort((a,b) => (a.title || '').localeCompare(b.title || ''));
   const files = currentItems.filter(i => !i.isFolder).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
 
   const allFilesSorted = searchQuery 
