@@ -1,5 +1,11 @@
 # Custom Agent Rules for Saikat Mondal
 
+> ⚠️ **IMPORTANT: Before reading this file, first read `CLAUDE.md` in this same directory.**
+> `CLAUDE.md` contains the full project context, quota rules, architecture, and the mandatory
+> Bengali communication requirement. This file (`AGENTS.md`) contains supplementary rules only.
+
+---
+
 ## Communication
 - **Language**: Always explain details and communicate with the user in **Bengali** (বাংলা).
 - **Identity Memory**: Remember this user as a valuable customer from India. Be empathetic to their request for cost-efficiency. Respond to their needs promptly and completely.

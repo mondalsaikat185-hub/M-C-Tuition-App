@@ -89,26 +89,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const userRef = doc(db, 'users', firebaseUser.uid);
         
         try {
-          // Check if user is an admin by querying the 'admins' collection
-          const adminDoc = await getDoc(doc(db, 'admins', firebaseUser.uid));
+          // Fetch admins collection and user doc in parallel — saves 1 Firestore read per login
+          const [adminDoc, docSnap] = await Promise.all([
+            getDoc(doc(db, 'admins', firebaseUser.uid)),
+            getDoc(userRef),
+          ]);
           let isAdmin = adminDoc.exists();
-          
-          if (!isAdmin) {
-             // Fallback for development: check if the user doc has role: 'admin'
-             const tempUserDoc = await getDoc(userRef);
-             if (tempUserDoc.exists() && tempUserDoc.data().role === 'admin') {
-                isAdmin = true;
-                // Auto-add to admins collection for future
-                try {
-                   await setDoc(doc(db, 'admins', firebaseUser.uid), { email: firebaseUser.email, role: 'admin' });
-                } catch (e) {
-                   console.log("Could not auto-add to admins", e);
-                }
-             }
-          }
 
-          // Initialize if it doesn't exist, then load into state
-          const docSnap = await getDoc(userRef);
+          // Fallback: if not in admins collection, check role field in user doc (dev/migration)
+          if (!isAdmin && docSnap.exists() && docSnap.data().role === 'admin') {
+             isAdmin = true;
+             // Auto-add to admins collection for future (fire-and-forget, non-blocking)
+             setDoc(doc(db, 'admins', firebaseUser.uid), { email: firebaseUser.email, role: 'admin' }).catch(e =>
+               console.log("Could not auto-add to admins", e)
+             );
+          }
 
           if (!docSnap.exists()) {
             let preCreatedData = null;
@@ -153,8 +148,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                }
             }
 
-            const freshSnap = await getDoc(userRef);
-            if (freshSnap.exists()) setUser(freshSnap.data() as AppUser);
+            // Use local newUser object — no extra getDoc read needed after setDoc
+            setUser({ ...newUser, createdAt: new Date(), updatedAt: new Date() } as any);
           } else {
             // Already exists
             const data = docSnap.data();
@@ -232,3 +227,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     </AuthContext.Provider>
   );
 }
+                                                                                          

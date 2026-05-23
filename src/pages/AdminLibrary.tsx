@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, writeBatch, where, addDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, writeBatch, where, addDoc, updateDoc, onSnapshot, getDoc, deleteField } from 'firebase/firestore';
+import { cachedGetDocs, clearCache } from '../lib/cache';
 import { createExamSession, endExamSession } from '../lib/exam-session-utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { PageHeader } from './Pages';
 import { Loader2, Plus, Eye, Share2, Trash2, FileText, FileDown, BookOpen, Folder, FolderPlus, ChevronRight, Pencil } from 'lucide-react';
 import { useAuth } from '../components/AuthProvider';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
-import { cachedGetDocs } from '../lib/cache';
 
 export interface LibraryItem {
   id: string;
@@ -111,7 +111,39 @@ export function AdminLibrary() {
 
   const [loadedFolders, setLoadedFolders] = useState<Set<string | null>>(new Set());
 
+  // One-time migration: copy batchAssignments → batches.assignedItemsMap
+  const runMigrationIfNeeded = async () => {
+    try {
+      const settingsRef = doc(db, 'settings', 'system');
+      const settingsSnap = await getDoc(settingsRef);
+      if (settingsSnap.exists() && settingsSnap.data().batchAssignmentsMigrated) return;
+
+      const allSnap = await getDocs(query(collection(db, 'batchAssignments')));
+      const byBatch: Record<string, Record<string, any>> = {};
+      allSnap.docs.forEach(d => {
+        const data = d.data();
+        if (!data.batchId || !data.libraryItemId) return;
+        if (!byBatch[data.batchId]) byBatch[data.batchId] = {};
+        byBatch[data.batchId][data.libraryItemId] = data.assignedAt || null;
+      });
+
+      await Promise.all(
+        Object.entries(byBatch).map(([batchId, itemsMap]) =>
+          updateDoc(doc(db, 'batches', batchId), { assignedItemsMap: itemsMap })
+            .catch(() => setDoc(doc(db, 'batches', batchId), { assignedItemsMap: itemsMap }, { merge: true }))
+        )
+      );
+      // Clear batch caches so students get fresh data
+      Object.keys(byBatch).forEach(bId => clearCache(`batch_${bId}`));
+      await setDoc(settingsRef, { batchAssignmentsMigrated: true }, { merge: true });
+      console.log('[Migration] batchAssignments → batches.assignedItemsMap complete.');
+    } catch (err) {
+      console.warn('[Migration] Could not run migration:', err);
+    }
+  };
+
   useEffect(() => {
+    runMigrationIfNeeded();
     fetchBatches();
   }, []);
 
@@ -548,12 +580,13 @@ export function AdminLibrary() {
   const handleDelete = async (id: string) => {
      try {
        setSubmitting(true);
-       
+
        const itemsToDelete = await getItemsToDelete(id);
-       
+
        let currentBatch = writeBatch(db);
        let opCount = 0;
-       
+       const affectedBatchIds = new Set<string>();
+
        const commitBatch = async () => {
           if (opCount > 0) {
              await currentBatch.commit();
@@ -567,11 +600,12 @@ export function AdminLibrary() {
            const qAssign = query(collection(db, 'batchAssignments'), where('libraryItemId', '==', delId));
            const snapAssign = await getDocs(qAssign);
            for (const a of snapAssign.docs) {
+              affectedBatchIds.add(a.data().batchId);
               currentBatch.delete(doc(db, 'batchAssignments', a.id));
               opCount++;
               if (opCount >= 490) await commitBatch();
            }
-           
+
            // Cleanup chunks if it's chunked
            if (item.isChunked && item.chunkCount) {
               for (let i = 0; i < item.chunkCount; i++) {
@@ -586,7 +620,21 @@ export function AdminLibrary() {
            if (opCount >= 490) await commitBatch();
        }
        await commitBatch();
-       
+
+       // Also remove deleted items from batches.assignedItemsMap
+       if (affectedBatchIds.size > 0) {
+         await Promise.all(
+           Array.from(affectedBatchIds).map(async (batchId) => {
+             const updates: Record<string, any> = {};
+             for (const item of itemsToDelete) {
+               updates[`assignedItemsMap.${item.id}`] = deleteField();
+             }
+             await updateDoc(doc(db, 'batches', batchId), updates).catch(() => {});
+             clearCache(`batch_${batchId}`);
+           })
+         );
+       }
+
        setDeleteItemId(null);
        handleRefreshFolder();
      } catch (err: any) {
@@ -695,6 +743,33 @@ export function AdminLibrary() {
         }
 
         await batchFn.commit();
+
+        // Sync batches.assignedItemsMap so students only need 1 read instead of 500
+        const mapUpdates: Promise<any>[] = [];
+        for (const a of previouslyAssigned) {
+          if (!currentSharedBatchIds.includes(a.batchId)) {
+            // Removed from this batch → delete from assignedItemsMap
+            mapUpdates.push(
+              updateDoc(doc(db, 'batches', a.batchId), {
+                [`assignedItemsMap.${selectedItem.id}`]: deleteField()
+              }).catch(() => {})
+            );
+            clearCache(`batch_${a.batchId}`);
+          }
+        }
+        for (const bId of currentSharedBatchIds) {
+          if (!existingBatchIds.includes(bId)) {
+            // Newly assigned → add to assignedItemsMap
+            mapUpdates.push(
+              updateDoc(doc(db, 'batches', bId), {
+                [`assignedItemsMap.${selectedItem.id}`]: serverTimestamp()
+              }).catch(() => {})
+            );
+            clearCache(`batch_${bId}`);
+          }
+        }
+        await Promise.all(mapUpdates);
+
         setIsShareModalOpen(false);
      } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, 'batchAssignments');

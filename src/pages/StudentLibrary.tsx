@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, getDocs, where, doc, getDoc, deleteDoc, updateDoc, onSnapshot, limit } from 'firebase/firestore';
+import { cachedGetDocs, cachedGetDoc } from '../lib/cache';
 import { PageHeader } from './Pages';
 import { Loader2, Eye, FileText, FileDown, BookOpen, Folder, ChevronRight, Clock, Search, FolderOpen, PenTool } from 'lucide-react';
 import { useAuth } from '../components/AuthProvider';
@@ -8,7 +9,6 @@ import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
 import { LibraryItem } from './AdminLibrary';
 import { verifyAndJoinSession, joinSessionWithoutCode } from '../lib/exam-session-utils';
 import { useSearchParams } from 'react-router-dom';
-import { cachedGetDocs } from '../lib/cache';
 import { safeToDate } from '../lib/utils';
 
 export function StudentLibrary() {
@@ -83,6 +83,9 @@ export function StudentLibrary() {
     return new Set();
   });
   const sessionCacheRef = useRef<Map<string, {data: any[], time: number}>>(new Map());
+  // Ref to hold latest libraryCache so fetch effects don't need it as a dependency
+  const libraryCacheRef = useRef<Map<string, LibraryItem>>(libraryCache);
+  useEffect(() => { libraryCacheRef.current = libraryCache; }, [libraryCache]);
 
   useEffect(() => {
     try {
@@ -109,14 +112,23 @@ export function StudentLibrary() {
     }
     setLoading(true);
     try {
-        const q = query(collection(db, 'batchAssignments'), where('batchId', '==', user.batchId));
-        const assignSnaps = await cachedGetDocs(q, `assignments_${user.batchId}`);
-        const assigns = assignSnaps.docs.map(d => ({id: d.id, ...d.data()} as any));
-        assigns.sort((a,b) => {
+        // 1 read from batches doc instead of up to 500 reads from batchAssignments collection
+        const batchSnap = await cachedGetDoc(doc(db, 'batches', user.batchId), `batch_${user.batchId}`);
+        if (!batchSnap.exists()) {
+            setAllAssigns([]);
+            setLoading(false);
+            return;
+        }
+        const batchData = batchSnap.data();
+        const assignedItemsMap: Record<string, any> = batchData.assignedItemsMap || {};
+        const assigns = Object.entries(assignedItemsMap).map(([itemId, assignedAt]) => ({
+            libraryItemId: itemId,
+            assignedAt: assignedAt ?? null,
+        }));
+        // Sort newest-assigned first (nulls go to end)
+        assigns.sort((a, b) => {
             const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
-            const tA = getMs(a.assignedAt);
-            const tB = getMs(b.assignedAt);
-            return tB - tA;
+            return getMs(b.assignedAt) - getMs(a.assignedAt);
         });
         setAllAssigns(assigns);
     } catch(err) {
@@ -189,7 +201,7 @@ export function StudentLibrary() {
         }
 
         const cutoff = Date.now() - (weeksToShow * 7 * 24 * 60 * 60 * 1000);
-        
+
         const visibleAssigns = allAssigns.filter(a => {
            const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
            const t = getMs(a.assignedAt);
@@ -197,9 +209,9 @@ export function StudentLibrary() {
         });
 
         const neededRootIds = Array.from(new Set<string>(visibleAssigns.map(a => a.libraryItemId)));
-        
-        // Read cache directly — this is safe because libraryCache is in the dependency array
-        const currentCache = new Map(libraryCache);
+
+        // Use ref instead of state — prevents this effect from re-triggering when cache is updated
+        const currentCache = new Map(libraryCacheRef.current);
 
         let missingIds = neededRootIds.filter(id => !currentCache.has(id));
         missingIds.sort(); // Sort to ensure stable chunk cache keys
@@ -212,14 +224,14 @@ export function StudentLibrary() {
                for (let i = 0; i < currentIdsToCheck.length; i += 30) {
                    chunks.push(currentIdsToCheck.slice(i, i + 30));
                }
-               
+
                const nextIds = new Set<string>();
                for (const chunk of chunks) {
                    try {
                      const q = query(collection(db, 'library'), where('__name__', 'in', chunk));
                      chunk.sort();
                      const snaps = await cachedGetDocs(q, `lib_chunk_${chunk.join('_')}`);
-                     
+
                      // Stop infinite fetching for deleted library items that are still assigned
                      const foundIds = new Set(snaps.docs.map(s => s.id));
                      chunk.forEach(id => {
@@ -244,12 +256,13 @@ export function StudentLibrary() {
            }
            setLibraryCache(currentCache);
         }
-        
+
         setLoading(false);
     };
 
     processVisibleItems();
-  }, [allAssigns, weeksToShow, libraryCache]); // Safe: exits early when all items cached
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allAssigns, weeksToShow]); // libraryCache intentionally excluded — use libraryCacheRef to prevent re-trigger loop
 
   const handleOpenFolder = async (folderId: string | null) => {
       setCurrentFolderId(folderId);

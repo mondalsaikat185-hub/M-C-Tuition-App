@@ -148,7 +148,8 @@ export async function getAllAttendanceForBatch(batchId: string, limitCount: numb
       where('batchId', '==', batchId),
       limit(limitCount * 2)
     );
-    const snap = await cachedGetDocs(fallbackQ, `attendance_batch_${batchId}`);
+    // Use same cache key as the normal path so both paths share one cached result
+    const snap = await cachedGetDocs(fallbackQ, `attendance_${batchId}_${limitCount}`);
     const mapped = snap.docs.map((d: any) => ({
       date: d.data().date as string,
       presentStudentIds: d.data().presentStudentIds as string[],

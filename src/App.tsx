@@ -31,7 +31,6 @@ import {
   updateDoc,
   collection,
   query,
-  onSnapshot,
   where,
   getDocs,
   limit,
@@ -52,7 +51,7 @@ import { AdminResults } from "./pages/AdminResults";
 import { AdminSettings } from "./pages/AdminSettings";
 import { ProfileSetup } from "./pages/ProfileSetup";
 import { StudentLibrary } from "./pages/StudentLibrary";
-import { cachedGetDocs } from "./lib/cache";
+import { cachedGetDocs, cachedGetDoc } from "./lib/cache";
 
 function ProtectedRoute({
   children,
@@ -207,33 +206,42 @@ function TopNav() {
   useEffect(() => {
     if (!user) return;
 
-    let qCall = query(
-      collection(db, "notifications"),
-      orderBy("createdAt", "desc"),
-      limit(user.role === "student" ? 100 : 20) // Load more for students so client-side filter catches relevant ones
-    );
-
-    const unsubscribe = onSnapshot(qCall, (snap) => {
-      let notifs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-      if (user.role === "student") {
-        notifs = notifs.filter(
-          (n: any) =>
-            n.senderId === user.uid ||
-            n.targetId === user.uid ||
-            n.type === "admin_to_all" ||
-            (n.type === "admin_to_batch" && n.batchId === (user as any).batchId),
+    const fetchUnreadCount = async () => {
+      try {
+        const notifQuery = query(
+          collection(db, "notifications"),
+          orderBy("createdAt", "desc"),
+          limit(user.role === "student" ? 30 : 20),
         );
+        const snap = await cachedGetDocs(
+          notifQuery,
+          `notif_count_${user.uid}`,
+        );
+        let notifs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+        if (user.role === "student") {
+          notifs = notifs.filter(
+            (n: any) =>
+              n.senderId === user.uid ||
+              n.targetId === user.uid ||
+              n.type === "admin_to_all" ||
+              (n.type === "admin_to_batch" &&
+                n.batchId === (user as any).batchId),
+          );
+        }
+        const unread = notifs.filter(
+          (n: any) =>
+            n.senderId !== user.uid && !(n.readers || []).includes(user.uid),
+        ).length;
+        setUnreadCount(unread);
+      } catch (err) {
+        console.error("Notifications fetch error", err);
       }
-      const unread = notifs.filter(
-        (n: any) =>
-          n.senderId !== user.uid && !(n.readers || []).includes(user.uid),
-      ).length;
-      setUnreadCount(unread);
-    }, (err) => {
-      console.error("Notifications fetch error", err);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchUnreadCount();
+    // Poll every 5 minutes — avoids real-time listener which charges reads on every notification change
+    const pollInterval = setInterval(fetchUnreadCount, 5 * 60 * 1000);
+    return () => clearInterval(pollInterval);
   }, [user?.uid, user?.role, (user as any)?.batchId]);
 
   const handleEditProfileOpen = () => {
@@ -735,8 +743,6 @@ function StudentDashboard() {
   useEffect(() => {
     if (!user?.uid) return;
 
-    let unsubAssign: (() => void) | null = null;
-
     const fetchPayment = async () => {
       try {
         let pData: Payment[] = [];
@@ -753,7 +759,7 @@ function StudentDashboard() {
             );
         } catch (idxErr: any) {
             // Fallback if missing composite index
-            const fallbackQ = query(collection(db, "payments"), where("studentId", "==", user.uid));
+            const fallbackQ = query(collection(db, "payments"), where("studentId", "==", user.uid), limit(10));
             const paySnaps = await cachedGetDocs(fallbackQ, `all_payments_${user.uid}`);
             paySnaps.forEach((d) =>
               pData.push({ id: d.id, ...d.data() } as Payment),
@@ -809,27 +815,20 @@ function StudentDashboard() {
 
     if (user.batchId) {
       try {
-        const assignQ = query(
-          collection(db, "batchAssignments"),
-          where("batchId", "==", user.batchId),
-        );
-        
         const fetchAssignments = async () => {
-           const assignSnaps = await cachedGetDocs(assignQ, `assignments_${user.batchId}`);
-           const assigns = assignSnaps.docs.map((d) => ({
-             id: d.id,
-             ...(d.data() as any),
-           }));
-           assigns.sort(
-             (a, b) => {
+           // 1 read from batches doc instead of up to 500 reads from batchAssignments
+           const batchSnap = await cachedGetDoc(doc(db, 'batches', user.batchId!), `batch_${user.batchId}`);
+           if (!batchSnap.exists()) return;
+           const batchData = batchSnap.data();
+           const assignedItemsMap: Record<string, any> = batchData.assignedItemsMap || {};
+           const assigns = Object.entries(assignedItemsMap)
+             .map(([itemId, assignedAt]) => ({ libraryItemId: itemId, assignedAt: assignedAt ?? null }))
+             .sort((a, b) => {
                const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
                return getMs(b.assignedAt) - getMs(a.assignedAt);
-             }
-           );
- 
-           let sortedAssignedIds = Array.from(
-             new Set(assigns.map((a) => a.libraryItemId)),
-           );
+             });
+
+           const sortedAssignedIds = assigns.map((a) => a.libraryItemId);
            const targetIds = sortedAssignedIds.slice(0, 20);
            if (targetIds.length > 0) {
              const allItems: any[] = [];
@@ -840,7 +839,7 @@ function StudentDashboard() {
                  where("__name__", "in", chunk),
                );
                chunk.sort();
-              const libSnaps = await cachedGetDocs(libQ, `lib_chunk_${chunk.join('_')}`);
+               const libSnaps = await cachedGetDocs(libQ, `lib_chunk_${chunk.join('_')}`);
                libSnaps.forEach((d) => allItems.push({ id: d.id, ...d.data() }));
              }
              const accessibleFiles = allItems.filter((i) => !i.isFolder);
@@ -1524,21 +1523,4 @@ export default function App() {
                 }
               />
               <Route
-                path="payments"
-                element={
-                  <ProtectedRoute>
-                    <StudentPayments />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="exams"
-                element={<Navigate to="/student/library" replace />}
-              />
-            </Route>
-          </Routes>
-        </main>
-      </div>
-    </Router>
-  );
-}
+                path="payments

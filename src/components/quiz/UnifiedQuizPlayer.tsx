@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Exam } from '../../pages/Pages';
-import { addDoc, collection, serverTimestamp, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, getDocs, query, where, Timestamp, limit } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../AuthProvider';
+import { cachedGetDocs, clearCache } from '../../lib/cache';
 
 export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: Exam, onBack: () => void, isPreview?: boolean }) {
   const { user } = useAuth();
@@ -54,8 +55,9 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
           return;
        }
        try {
-          const q = query(collection(db, 'results'), where('studentId', '==', user.uid), where('examId', '==', exam.id));
-          const snap = await getDocs(q);
+          // Cached + limited — prevents repeated reads when student re-opens exam
+          const q = query(collection(db, 'results'), where('studentId', '==', user.uid), where('examId', '==', exam.id), limit(1));
+          const snap = await cachedGetDocs(q, `result_check_${user.uid}_${exam.id}`);
           if (!snap.empty) {
              setAlreadySubmitted(true);
           }
@@ -224,6 +226,8 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
            createdAt: serverTimestamp(),
            expireAt: expireAt
         });
+        // Clear cached result check so re-open correctly shows "already submitted"
+        clearCache(`result_check_${user.uid}_${exam.id}`);
       } catch (saveErr) {
         console.error('Result save failed:', saveErr);
       }

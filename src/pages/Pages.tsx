@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Check, X, Loader2, Trash2, Plus, Search } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { collection, getDocs, getDoc, doc, updateDoc, setDoc, query, where, addDoc, deleteDoc, serverTimestamp, writeBatch, Timestamp, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, updateDoc, setDoc, query, where, addDoc, deleteDoc, serverTimestamp, writeBatch, Timestamp, orderBy, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { AppUser, useAuth } from '../components/AuthProvider';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
@@ -169,7 +169,7 @@ export function AdminStudents() {
         }
 
         const [studentsSnap, batchesSnap] = await Promise.all([
-          cachedGetDocs(collection(db, 'users'), 'all_users'),
+          cachedGetDocs(query(collection(db, 'users'), limit(100)), 'all_users'),
           cachedGetDocs(collection(db, 'batches'), 'all_batches'),
         ]);
         
@@ -960,7 +960,7 @@ export function AdminPayments() {
          setBatches(globalBatchesCache);
       } else {
          const [uSnap, bSnap] = await Promise.all([
-           cachedGetDocs(collection(db, 'users'), 'all_users'),
+           cachedGetDocs(query(collection(db, 'users'), limit(100)), 'all_users'),
            cachedGetDocs(collection(db, 'batches'), 'all_batches')
          ]);
 
@@ -1363,7 +1363,7 @@ export function StudentPayments() {
 
      const fetchPayments = async () => {
        try {
-         const q = query(collection(db, 'payments'), where('studentId', '==', user.uid));
+         const q = query(collection(db, 'payments'), where('studentId', '==', user.uid), orderBy('createdAt', 'desc'), limit(50));
          const snap = await cachedGetDocs(q, `student_payments_${user.uid}`);
          const data: Payment[] = [];
          snap.forEach((doc) => {

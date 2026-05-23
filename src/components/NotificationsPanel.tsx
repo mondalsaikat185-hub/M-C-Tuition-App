@@ -43,7 +43,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
        q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(50));
     } else {
        // student sees admin_to_all, admin_to_batch (where batch matches), and their own sent msgs
-       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(30));
+       q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'), limit(20));
     }
 
     const fetchNotifs = async () => {
@@ -102,6 +102,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
         setMessage('');
         setTargetBatch('all');
         clearCache(`notifications_${user.uid}`);
+        clearCache(`notif_count_${user.uid}`); // Also clear TopNav unread count cache
         setRefreshKey(k => k + 1);
      } catch (err) {
         console.error("Failed to save notification", err);
@@ -157,7 +158,7 @@ export function NotificationsPanel({ onClose }: { onClose: () => void }) {
                  <div className="flex items-center gap-2">
                     <Bell className="w-5 h-5" /> Notifications
                  </div>
-                 <button onClick={() => { clearCache(`notifications_${user.uid}`); setRefreshKey(k => k + 1); }} className="text-xs uppercase bg-black dark:bg-zinc-100 text-white dark:text-black px-2 py-1 flex items-center gap-1 active:translate-y-px">
+                 <button onClick={() => { clearCache(`notifications_${user.uid}`); clearCache(`notif_count_${user.uid}`); setRefreshKey(k => k + 1); }} className="text-xs uppercase bg-black dark:bg-zinc-100 text-white dark:text-black px-2 py-1 flex items-center gap-1 active:translate-y-px">
                      Refresh
                  </button>
              </div>
