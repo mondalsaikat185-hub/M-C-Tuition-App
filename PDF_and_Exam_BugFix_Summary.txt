@@ -1,0 +1,73 @@
+================================================================================
+           M-C-TUITION-APP: BUG FIXES & VISIBILITY SUMMARY REPORT
+================================================================================
+
+This document outlines the exact modifications made in the codebase to resolve the 
+blank screen issue, ensure PDF and Exam visibility, and make the application 
+extremely robust.
+
+--------------------------------------------------------------------------------
+1. RESOLVED: React Hooks Invariant Violation (Fixed Blank Page in StudentLibrary)
+--------------------------------------------------------------------------------
+- File Modified: `src/pages/StudentLibrary.tsx`
+- Problem: An early return statement `if (previewItem)` was located at the top 
+  of the render function (before hooks like `useEffect`, `useMemo`, etc., were 
+  declared). In React, hook declarations MUST execute in the exact same order 
+  on every render. Returning early caused React to throw: 
+  "Error: Rendered fewer hooks than expected. This may be caused by an accidental 
+  early return statement." resulting in a blank screen.
+- Solution: Moved the `if (previewItem)` conditional return block down in the file, 
+  ensuring it occurs ONLY after all React state and effect hooks have fully 
+  declared and initialized.
+
+--------------------------------------------------------------------------------
+2. RESOLVED: PDF Notes Visibility in Student Library
+--------------------------------------------------------------------------------
+- File Modified: `src/pages/StudentLibrary.tsx`
+- Problem: The files/folders filter in the Study Materials tab was configured 
+  too strictly (checking `i.type === 'note'`), which hid study items/PDFs that 
+  deviated from this exact type tag.
+- Solution: Adjusted the filtering conditions so that when in 'NOTE' mode (Study 
+  Materials), we filter items using `i.type !== 'exam'` instead of strictly 
+  `i.type === 'note'`. This ensures that all PDFs, assignments, and notes 
+  correctly show up in their respective library folders.
+- Clean Navigation Fix: Added current folder reset on tab change:
+  `setCurrentFolderId(null);` so that switching between Study Materials and 
+  Exams returns the user to the root folder rather than carrying over a nested 
+  folder ID from the other tab.
+
+--------------------------------------------------------------------------------
+3. RESOLVED: UnifiedQuizPlayer Robustness (Preempting Crashes)
+--------------------------------------------------------------------------------
+- File Modified: `src/components/quiz/UnifiedQuizPlayer.tsx`
+- Problem: The exam/quiz player did not handle empty, null, or malformed data 
+  in certain questions safely, causing JavaScript property access runtime 
+  errors (which would crash the page to a blank screen).
+- Solution:
+  - Added optional chaining (`q?.`) to all dynamic question properties (e.g. 
+    `question_bn`, `question_en`, `options_bn`, `options_en`, `sentences`).
+  - Added safe type-casting using `String()` on question and option text to 
+    handle numeric or unexpected data formats safely.
+  - Implemented automatic validation `Array.isArray(optsRaw) ? optsRaw : []` 
+    to prevent mapping over non-array option blocks.
+  - Added `typeof q.sentences === 'object'` verification prior to mapping.
+
+--------------------------------------------------------------------------------
+4. ADDED: Global Error Boundary for Seamless Recovery
+--------------------------------------------------------------------------------
+- Files Added/Modified: `src/components/ErrorBoundary.tsx` and `src/main.tsx`
+- Implementation: Created a new React Error Boundary component and wrapped the 
+  outermost layer of the application tree (`<App />`) with it in `main.tsx`.
+- Purpose: If any unexpected component crash occurs in the future, it is caught 
+  safely. Instead of rendering a silent blank white screen, the app displays 
+  a premium error dashboard with diagnostic trace details and an easy 
+  "Reload Application" button, dramatically improving user experience.
+
+================================================================================
+                             DEPLOYMENT COMPLETED
+================================================================================
+- Local Working Directory: `C:\Users\monda\Desktop\Tution Application`
+- Repository Target: `mondalsaikat185-hub/M-C-Tuition-App` on branch `main`
+- Method: Changes cleanly committed and pushed directly to GitHub using the 
+  authorized configurations from `D:\Claude Project\Software\Local Hosting`.
+================================================================================
