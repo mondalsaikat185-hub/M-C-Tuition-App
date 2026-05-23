@@ -383,10 +383,10 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
 
           <div className={`${passage ? "md:col-span-1" : "md:col-span-2"} flex flex-col gap-6`}>
              {questions.map((q: any, i: number) => {
-               const qText = (lang === 'bn' && q.question_bn) ? q.question_bn : (q.question_en || q.question || 'Question ?');
-               const optsRaw = (lang === 'bn' && q.options_bn && q.options_bn.length) ? q.options_bn : (q.options_en || q.options || []);
+               const qText = String((lang === 'bn' && q?.question_bn) ? q.question_bn : (q?.question_en || q?.question || 'Question ?'));
+               const optsRaw = (lang === 'bn' && q?.options_bn && q.options_bn.length) ? q.options_bn : (q?.options_en || q?.options || []);
                const opts = Array.isArray(optsRaw) ? optsRaw : [];
-               const questionKey = q.id || `q-${i}-${qText.substring(0, 10)}`;
+               const questionKey = q?.id || `q-${i}-${qText.substring(0, 10)}`;
 
                return (
                  <div key={questionKey} className="bg-white dark:bg-zinc-900 border-x border-y border-zinc-200 dark:border-zinc-800 p-6 shadow-sm rounded-xl relative overflow-hidden transition-all duration-300 hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50 group">
@@ -395,7 +395,7 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
                        <span className="shrink-0 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-black w-8 h-8 flex items-center justify-center rounded-full text-sm shadow-inner shadow-blue-500/20">{i+1}</span>
                        <h4 className="font-bold text-lg whitespace-pre-wrap leading-relaxed text-left sm:text-justify flex-1 text-zinc-800 dark:text-zinc-100 mt-1 min-w-0">{qText}</h4>
                     </div>
-                    {q.sentences && (
+                    {q?.sentences && typeof q.sentences === 'object' && (
                        <div className="mb-5 space-y-2 bg-blue-50/50 dark:bg-indigo-950/20 p-4 border border-blue-100 dark:border-indigo-900/50 rounded-lg text-left sm:text-justify text-zinc-700 dark:text-zinc-300 ml-11 overflow-x-auto">
                           {Object.keys(q.sentences).map(k => (
                              <div key={`${questionKey}-s-${k}`} className="flex gap-2 text-sm min-w-max sm:min-w-0"><strong className="text-blue-700 dark:text-blue-300">{k}.</strong> <span className="whitespace-pre-wrap">{q.sentences[k]}</span></div>
@@ -443,7 +443,7 @@ export function UnifiedQuizPlayer({ exam, onBack, isPreview = false }: { exam: E
                               className={`p-3 border-2 cursor-pointer transition-colors ${bgClass} ${borderClass} flex gap-3 text-sm`}
                             >
                                <span className={`font-black opacity-50 ${textClass || "text-zinc-900 dark:text-zinc-100"}`}>{String.fromCharCode(65 + optIdx)}.</span>
-                               <span className={textClass || "text-zinc-900 dark:text-zinc-100"}>{opt}</span>
+                               <span className={textClass || "text-zinc-900 dark:text-zinc-100"}>{String(opt)}</span>
                             </div>
                           )
                        })}

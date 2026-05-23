@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, where, doc, getDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, where, doc, getDoc, deleteDoc, updateDoc, onSnapshot, limit } from 'firebase/firestore';
 import { PageHeader } from './Pages';
 import { Loader2, Eye, FileText, FileDown, BookOpen, Folder, ChevronRight, Clock, Search, FolderOpen, PenTool } from 'lucide-react';
 import { useAuth } from '../components/AuthProvider';
@@ -657,28 +657,6 @@ export function StudentLibrary() {
      }
   };
 
-  if (previewItem) {
-     if (previewItem.type !== 'exam') {
-        // Safety guard: non-exam item should never reach UnifiedQuizPlayer
-        return (
-          <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] text-center mt-8">
-            <div className="text-5xl mb-4">📄</div>
-            <h2 className="text-2xl font-black uppercase mb-4">Study Material</h2>
-            <p className="font-bold text-zinc-600 dark:text-zinc-400 mb-6">
-              এই study material টি Library থেকে Download করুন।
-              এটি এখানে সরাসরি দেখানো সম্ভব নয়।
-            </p>
-            <button
-              onClick={() => setPreviewItem(null)}
-              className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-black uppercase px-6 py-3 border-2 border-transparent shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] hover:-translate-y-0.5 transition-transform"
-            >
-              ← Library-তে ফিরুন
-            </button>
-          </div>
-        );
-     }
-     return <UnifiedQuizPlayer exam={previewItem as any} onBack={() => setPreviewItem(null)} />;
-  }
 
   const getBreadcrumbs = () => {
      const crumbs: {id: string, title: string}[] = [];
@@ -759,7 +737,7 @@ export function StudentLibrary() {
      ? (i.title?.toLowerCase() || '').includes(searchQuery.toLowerCase()) && (libraryMode === 'NOTE' ? i.type !== 'exam' : i.type === 'exam')
      : (i.parentId || null) === currentFolderId && (
          (i.isFolder && isFolderVisible(i, libraryMode as 'EXAM' | 'NOTE')) || 
-         (!i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam'))
+         (!i.isFolder && (libraryMode === 'NOTE' ? i.type !== 'exam' : i.type === 'exam'))
        )
   );
   const getMs = (t: any) => t?.toMillis?.() || (t?.seconds ? t.seconds * 1000 : 0) || 0;
@@ -768,7 +746,7 @@ export function StudentLibrary() {
 
   const allFilesSorted = searchQuery 
     ? files 
-    : items.filter(i => !i.isFolder && i.type === (libraryMode === 'NOTE' ? 'note' : 'exam')).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
+    : items.filter(i => !i.isFolder && (libraryMode === 'NOTE' ? i.type !== 'exam' : i.type === 'exam')).sort((a,b) => getMs(b.createdAt) - getMs(a.createdAt));
 
    // Debug check
    useEffect(() => {
@@ -797,18 +775,41 @@ export function StudentLibrary() {
      }
   };
 
+  if (previewItem) {
+     if (previewItem.type !== 'exam') {
+        // Safety guard: non-exam item should never reach UnifiedQuizPlayer
+        return (
+          <div className="p-6 max-w-2xl mx-auto bg-white dark:bg-zinc-900 border-2 border-zinc-900 dark:border-zinc-100 shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] text-center mt-8">
+            <div className="text-5xl mb-4">📄</div>
+            <h2 className="text-2xl font-black uppercase mb-4">Study Material</h2>
+            <p className="font-bold text-zinc-600 dark:text-zinc-400 mb-6">
+              এই study material টি Library থেকে Download করুন।
+              এটি এখানে সরাসরি দেখানো সম্ভব নয়।
+            </p>
+            <button
+              onClick={() => setPreviewItem(null)}
+              className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-black uppercase px-6 py-3 border-2 border-transparent shadow-[4px_4px_0px_0px_rgba(161,161,170,1)] hover:-translate-y-0.5 transition-transform"
+            >
+              ← Library-তে ফিরুন
+            </button>
+          </div>
+        );
+     }
+     return <UnifiedQuizPlayer exam={previewItem as any} onBack={() => setPreviewItem(null)} />;
+  }
+
   if (!libraryMode) {
       return (
          <div className="p-4 sm:p-6 max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[70vh] w-full text-center">
              <h1 className="text-3xl font-black mb-8 uppercase text-zinc-900 dark:text-zinc-100">Welcome to Library</h1>
              <p className="text-zinc-600 dark:text-zinc-400 font-bold mb-10">What would you like to access today?</p>
              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full max-w-2xl px-4">
-                 <button onClick={() => setLibraryMode('NOTE')} className="flex flex-col items-center gap-4 bg-zinc-50 dark:bg-zinc-900/50 border-4 border-zinc-900 dark:border-zinc-100 p-8 hover:-translate-y-2 transition-transform shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] group">
+                 <button onClick={() => { setCurrentFolderId(null); setLibraryMode('NOTE'); }} className="flex flex-col items-center gap-4 bg-zinc-50 dark:bg-zinc-900/50 border-4 border-zinc-900 dark:border-zinc-100 p-8 hover:-translate-y-2 transition-transform shadow-[8px_8px_0px_0px_rgba(24,24,27,1)] dark:shadow-[8px_8px_0px_0px_rgba(244,244,245,1)] group">
                     <div className="bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 p-6 rounded-full group-hover:scale-110 transition-transform"><BookOpen className="w-10 h-10" /></div>
                     <h2 className="text-2xl font-black uppercase text-zinc-900 dark:text-zinc-100">Study Materials</h2>
                     <p className="text-zinc-700 dark:text-zinc-400 font-medium">Access PDF notes, assignments & study guides</p>
                  </button>
-                 <button onClick={() => setLibraryMode('EXAM')} className="flex flex-col items-center gap-4 bg-blue-50 dark:bg-blue-900/20 border-4 border-blue-600 p-8 hover:-translate-y-2 transition-transform shadow-[8px_8px_0px_0px_rgba(37,99,235,1)] group">
+                 <button onClick={() => { setCurrentFolderId(null); setLibraryMode('EXAM'); }} className="flex flex-col items-center gap-4 bg-blue-50 dark:bg-blue-900/20 border-4 border-blue-600 p-8 hover:-translate-y-2 transition-transform shadow-[8px_8px_0px_0px_rgba(37,99,235,1)] group">
                     <div className="bg-blue-600 text-white p-6 rounded-full group-hover:scale-110 transition-transform"><PenTool className="w-10 h-10" /></div>
                     <h2 className="text-2xl font-black uppercase text-blue-900 dark:text-blue-100">Take an Exam</h2>
                     <p className="text-blue-700 dark:text-blue-300 font-medium">Participate in live exams or past mock tests</p>
@@ -842,7 +843,7 @@ export function StudentLibrary() {
              <PageHeader 
                 title="My Target Library" 
                 backTo="/" 
-                onBack={currentFolderId ? handleBackNavigation : undefined} 
+                onBack={handleBackNavigation} 
              />
              <button 
                 onClick={() => {

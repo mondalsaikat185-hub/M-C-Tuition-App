@@ -3,7 +3,7 @@ import { X, Bell, Plus, Edit, Trash2, CheckCircle, Loader2 } from 'lucide-react'
 import { useAuth } from './AuthProvider';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, arrayUnion, limit } from 'firebase/firestore';
-import { cachedGetDocs } from '../lib/cache';
+import { cachedGetDocs, clearCache } from '../lib/cache';
 import { safeToDate } from '../lib/utils';
 
 export function NotificationsPanel({ onClose }: { onClose: () => void }) {

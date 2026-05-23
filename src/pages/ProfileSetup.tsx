@@ -110,7 +110,7 @@ export function ProfileSetup() {
 
       if (updateLocalUser) {
         updateLocalUser({
-          fullName, phone, address, gender
+          fullName, phone, address
         } as any);
       }
 
