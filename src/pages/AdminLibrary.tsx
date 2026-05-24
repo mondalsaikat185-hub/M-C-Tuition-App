@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, writeBatch, where, addDoc, updateDoc, onSnapshot, getDoc, deleteField } from 'firebase/firestore';
+import { collection, query, getDocs, doc, setDoc, deleteDoc, serverTimestamp, writeBatch, where, addDoc, updateDoc, onSnapshot, getDoc, deleteField, limit } from 'firebase/firestore';
 import { cachedGetDocs, clearCache } from '../lib/cache';
 import { createExamSession, endExamSession } from '../lib/exam-session-utils';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
@@ -53,14 +53,19 @@ export function AdminLibrary() {
   const [activeSessionsList, setActiveSessionsList] = useState<any[]>([]);
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'examSessions'),
-      where('isActive', '==', true)
-    );
-    const unsub = onSnapshot(q, snap => {
+    // QUOTA FIX: replaced onSnapshot with getDocs + 30-sec polling (admin-only page)
+    const fetchActiveSessions = async () => {
+      const q = query(
+        collection(db, 'examSessions'),
+        where('isActive', '==', true),
+        limit(10)
+      );
+      const snap = await getDocs(q);
       setActiveSessionsList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-    return () => unsub();
+    };
+    fetchActiveSessions();
+    const interval = setInterval(fetchActiveSessions, 30 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
