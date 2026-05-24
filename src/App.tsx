@@ -1523,4 +1523,21 @@ export default function App() {
                 }
               />
               <Route
-                path="payments
+                path="payments"
+                element={
+                  <ProtectedRoute>
+                    <StudentPayments />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="exams"
+                element={<Navigate to="/student/library" replace />}
+              />
+            </Route>
+          </Routes>
+        </main>
+      </div>
+    </Router>
+  );
+}
