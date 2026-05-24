@@ -557,7 +557,16 @@ export function StudentLibrary() {
          }
 
          let batchSessionDocs: any[] = [];
-         
+
+         // QUOTA FIX: if student already joined this session, skip Firestore query entirely
+         const alreadyJoinedKey = `joined_exam_${item.id}_${(user as any).batchId}`;
+         const alreadyJoined = sessionStorage.getItem(alreadyJoinedKey);
+         if (alreadyJoined === 'true') {
+            // Already a participant — go straight to exam without reading Firestore
+            setPreviewItem(item);
+            return;
+         }
+
          try {
             const q = query(
                collection(db, 'examSessions'),
@@ -603,6 +612,8 @@ export function StudentLibrary() {
          // Check if already a participant
          const participants = activeSession.participantUids || [];
          if (participants.includes(user.uid)) {
+            // Mark in sessionStorage so future clicks skip Firestore query
+            sessionStorage.setItem(alreadyJoinedKey, 'true');
             setPreviewItem(item);
             return;
          }
@@ -617,6 +628,8 @@ export function StudentLibrary() {
                  (user as any).batchId
              );
              if (result === 'ok' || result === 'already_participated') {
+                 // Mark as joined so next click skips Firestore
+                 sessionStorage.setItem(alreadyJoinedKey, 'true');
                  setPreviewItem(item);
              }
              return;
@@ -648,6 +661,10 @@ export function StudentLibrary() {
 
        switch (result) {
           case 'ok':
+             // Mark as joined so future clicks skip Firestore query
+             if (user && (user as any).batchId) {
+                sessionStorage.setItem(`joined_exam_${codeInputItem.id}_${(user as any).batchId}`, 'true');
+             }
              setCodeInputItem(null);
              setPreviewItem(codeInputItem);
              break;
@@ -655,6 +672,10 @@ export function StudentLibrary() {
              setCodeError('❌ কোডটি ভুল। আবার চেষ্টা করুন।');
              break;
           case 'already_participated':
+             // Already a participant — mark as joined
+             if (user && (user as any).batchId) {
+                sessionStorage.setItem(`joined_exam_${codeInputItem.id}_${(user as any).batchId}`, 'true');
+             }
              setCodeError('আপনি এই session-এ ইতিমধ্যে যোগ দিয়েছেন।');
              setCodeInputItem(null);
              setPreviewItem(codeInputItem);

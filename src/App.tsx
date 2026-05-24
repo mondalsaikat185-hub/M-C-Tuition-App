@@ -1243,7 +1243,8 @@ function StudentSimulatorWrapper() {
       return;
     }
     const fetchStudentData = async () => {
-      const docSnap = await getDoc(doc(db, "users", simulatedStudentId));
+      // QUOTA FIX: use cachedGetDoc so switching student in simulator doesn't waste reads
+      const docSnap = await cachedGetDoc(doc(db, "users", simulatedStudentId), `user_${simulatedStudentId}`);
       if (docSnap.exists()) {
         setSimulatedStudentData(docSnap.data());
       } else {

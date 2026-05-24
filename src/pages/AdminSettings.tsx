@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Loader2, Save } from 'lucide-react';
 import { PageHeader } from './Pages';
+import { cachedGetDoc, clearCache } from '../lib/cache';
 
 export function AdminSettings() {
   const { user } = useAuth();
@@ -17,8 +18,8 @@ export function AdminSettings() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const docRef = doc(db, 'settings', 'general');
-        const docSnap = await getDoc(docRef);
+        // QUOTA FIX: use cachedGetDoc so repeated opens don't waste reads
+        const docSnap = await cachedGetDoc(doc(db, 'settings', 'general'), 'settings_general');
         if (docSnap.exists()) {
           const data = docSnap.data();
           setSettings({
@@ -44,6 +45,7 @@ export function AdminSettings() {
         adminUpiId: settings.adminUpiId,
         enablePaymentSystem: settings.enablePaymentSystem
       }, { merge: true });
+      clearCache('settings_general'); // Invalidate cache so next read gets fresh data
       alert("Settings saved successfully!");
     } catch (err) {
       alert("Failed to save settings: " + String(err));

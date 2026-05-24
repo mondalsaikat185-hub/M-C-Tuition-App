@@ -8,7 +8,7 @@ import { AppUser, useAuth } from '../components/AuthProvider';
 import { handleFirestoreError, OperationType } from '../lib/firestore-error';
 import { UnifiedQuizPlayer } from '../components/quiz/UnifiedQuizPlayer';
 import { getAllAttendanceForBatch } from '../lib/exam-session-utils';
-import { clearCache, cachedGetDocs } from '../lib/cache';
+import { clearCache, cachedGetDocs, cachedGetDoc } from '../lib/cache';
 
 export function PageHeader({ title, backTo, description, onBack }: { title: string, backTo?: string, description?: string, onBack?: () => void }) {
   const navigate = useNavigate();
@@ -1347,7 +1347,8 @@ export function StudentPayments() {
      
      const loadSettings = async () => {
        try {
-         const docSnap = await getDoc(doc(db, 'settings', 'general'));
+         // QUOTA FIX: use cachedGetDoc to prevent re-reads every time student opens payments
+         const docSnap = await cachedGetDoc(doc(db, 'settings', 'general'), 'settings_general');
          if (docSnap.exists()) {
            const data = docSnap.data();
            setSettings({
