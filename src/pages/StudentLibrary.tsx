@@ -402,19 +402,34 @@ export function StudentLibrary() {
     }
   };
 
+  // Module-level cache for chunked PDF data — persists across re-renders, cleared on page refresh
+  // Key: `${item.id}`, Value: base64 string
+  // This prevents re-reading Firestore chunks every time student downloads the same PDF
+  const chunkedPdfCache = useRef<Map<string, string>>(new Map());
+
   const handleDownloadChunked = async (item: LibraryItem) => {
      if (!item.isChunked || !item.chunkCount || !item.id) return;
      try {
         setDownloadingId(item.id);
-        const promises = Array.from({ length: item.chunkCount }, (_, i) =>
-           getDoc(doc(db, 'libraryChunks', `${item.id}_${i}`))
-        );
-        const snapshots = await Promise.all(promises);
-        const base64String = snapshots
-           .map(snap => (snap.exists() ? snap.data().data : ''))
-           .join('');
-        
-        const byteCharacters = atob(base64String);
+
+        // QUOTA FIX: Check in-memory cache first before reading Firestore chunks
+        let base64String = chunkedPdfCache.current.get(item.id);
+        if (base64String) {
+           // Cache hit — skip all Firestore reads
+        } else {
+           // Cache miss — read chunks from Firestore (only happens once per session)
+           const promises = Array.from({ length: item.chunkCount }, (_, i) =>
+              getDoc(doc(db, 'libraryChunks', `${item.id}_${i}`))
+           );
+           const snapshots = await Promise.all(promises);
+           base64String = snapshots
+              .map(snap => (snap.exists() ? snap.data().data : ''))
+              .join('');
+           // Cache the result so future downloads skip Firestore
+           chunkedPdfCache.current.set(item.id, base64String);
+        }
+        // base64String is now either from cache or freshly fetched above
+        const byteCharacters = atob(base64String!);
         const byteNumbers = new Array(byteCharacters.length);
         for (let i = 0; i < byteCharacters.length; i++) {
             byteNumbers[i] = byteCharacters.charCodeAt(i);

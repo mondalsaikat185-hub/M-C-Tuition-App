@@ -120,7 +120,8 @@ export function AdminLibrary() {
   const runMigrationIfNeeded = async () => {
     try {
       const settingsRef = doc(db, 'settings', 'system');
-      const settingsSnap = await getDoc(settingsRef);
+      // QUOTA FIX: use cachedGetDoc — migration is already done, no need to re-read every mount
+      const settingsSnap = await cachedGetDoc(settingsRef, 'settings_system');
       if (settingsSnap.exists() && settingsSnap.data().batchAssignmentsMigrated) return;
 
       const allSnap = await getDocs(query(collection(db, 'batchAssignments')));
@@ -160,9 +161,9 @@ export function AdminLibrary() {
     try {
         let q;
         if (folderId === null) {
-            q = query(collection(db, 'library'), where('parentId', '==', null));
+            q = query(collection(db, 'library'), where('parentId', '==', null), limit(300));
         } else {
-            q = query(collection(db, 'library'), where('parentId', '==', folderId));
+            q = query(collection(db, 'library'), where('parentId', '==', folderId), limit(300));
         }
         const snap = await cachedGetDocs(q, `admin_lib_folder_${folderId || 'root'}`);
         const fetchedItems: LibraryItem[] = [];
@@ -193,6 +194,9 @@ export function AdminLibrary() {
   }, [currentFolderId]);
 
   const handleRefreshFolder = () => {
+    // QUOTA FIX: clear only the current folder's cache key so admin sees fresh data
+    // without needing a full page refresh (which would reset ALL in-memory caches)
+    clearCache(`admin_lib_folder_${currentFolderId || 'root'}`);
     fetchFolderContent(currentFolderId, true);
   };
 
@@ -200,7 +204,7 @@ export function AdminLibrary() {
 
   const fetchBatches = async () => {
     try {
-      const q = query(collection(db, 'batches'));
+      const q = query(collection(db, 'batches'), limit(20));
       const snap = await cachedGetDocs(q, 'all_batches');
       const data: any[] = [];
       snap.forEach(d => data.push({ id: d.id, name: d.data().name }));
